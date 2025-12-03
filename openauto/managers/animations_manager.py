@@ -191,11 +191,22 @@ class AnimationsManager:
         self.show_page(hub_index=2, table_widget=self.ui.schedule_calendar, top_bar_index=4)
         self.ui.schedule_calendar.show()
         self.ui.calender_header_buttons.show()
+        self.ui.week_button.show()
+        # keep the weekly table in sync with the currently selected calendar date
+        date = getattr(self.ui.schedule_calendar, "selectedDate", lambda: None)() or QtCore.QDate.currentDate()
+        self.ui.weekly_schedule_table.set_horizontal_headers_for_date(date)
+        self.ui.weekly_schedule_table.load_appointments(date)
 
 
-    def show_week(self):
+    def show_week(self, date=None):
         w, h = self.ui.ro_tabs.width(), self.ui.ro_tabs.height()
-
+        # hide the toggle while already on the weekly view
+        self.ui.week_button.hide()
+        sel_date = date if isinstance(date, QtCore.QDate) else None
+        if sel_date is None:
+            sel_date = getattr(self.ui.schedule_calendar, "selectedDate", lambda: None)() or QtCore.QDate.currentDate()
+        self.ui.weekly_schedule_table.set_horizontal_headers_for_date(sel_date)
+        self.ui.weekly_schedule_table.load_appointments(sel_date)
         self.ui.animate_week.setStartValue(QRect(0, 0, 0, 0))
         self.ui.animate_week.setEndValue(QRect(9, 9, w, h))
         self.ui.animate_week.setEasingCurve(QEasingCurve.Type.InOutQuart)
@@ -205,6 +216,8 @@ class AnimationsManager:
 
     def show_hourly(self):
         w, h = self.ui.ro_tabs.width(), self.ui.ro_tabs.height()
+        # show the week toggle when on the daily view
+        self.ui.week_button.show()
         self.ui.animate_day.setStartValue(QRect(0, 0, 0, 0))
         self.ui.animate_day.setEndValue(QRect(9, 9, w, h))
         self.ui.animate_day.start()

@@ -882,6 +882,28 @@ QWidget {
     background-color: #d8e3f2;
 }
 
+#payments_button {
+    background-color: #85BB65;
+    color: #fff;
+    border-radius: 2px;
+    font-size: 16px;
+}
+
+#payments_button::hover {
+    background-color: #324d22;
+    border-radius: 5px;
+}
+
+#square_integrate_button {
+    background-color: #7b9bd7;
+    color: #fff;
+    border-radius: 2px;
+}
+
+#square_integrate_button::hover {
+    background-color: #406fc5;
+    border-radius: 5px;
+}
 
 QComboBox::down-arrow {
     background-color: #808080;

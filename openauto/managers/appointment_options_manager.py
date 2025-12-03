@@ -1,5 +1,7 @@
+from pathlib import Path
+from types import SimpleNamespace
 from PyQt6 import QtWidgets, QtCore
-from openauto.ui import appointment_options, edit_appointment
+from openauto.ui import edit_appointment
 from openauto.subclassed_widgets.event_handlers import WidgetManager
 from openauto.repositories import appointment_repository, vehicle_repository
 from openauto.repositories.appointment_repository import AppointmentRepository
@@ -17,9 +19,8 @@ class AppointmentOptionsManager:
         self.message = QtWidgets.QMessageBox(self.parent)
         self.message_confirm = QtWidgets.QMessageBox(self.parent)
 
-        self.window, self.ui = self.widget_manager.create_or_restore(
-            "appointment_options", QtWidgets.QWidget, appointment_options.Ui_appointment_options_form
-            )
+        self.window = None
+        self.ui = None
 
         self.edit_window, self.edit_ui = self.widget_manager.create_or_restore(
             "edit_appointment", QtWidgets.QWidget, edit_appointment.Ui_edit_appt_form
@@ -27,19 +28,138 @@ class AppointmentOptionsManager:
 
         self._setup_ui()
 
+    def _theme_palette(self):
+        theme = getattr(self.parent, "current_theme", "dark")
+        if theme == "light":
+            return {
+                "name": "light",
+                "bg": "#F5F7FA",
+                "surface": "#FFFFFF",
+                "text": "#1E1E1E",
+                "text2": "#5C5C5C",
+                "accent": "#314455",
+                "accentHover": "#4F6D7A",
+                "accentPress": "#22313F",
+                "fieldBg": "#FFFFFF",
+                "fieldBorder": "#C7CDD3",
+                "success": "#4A6260",
+                "successHover": "#759093",
+                "successPress": "#314455",
+                "danger": "#C96567",
+                "dangerHover": "#9E5A63",
+                "dangerPress": "#7a0f31",
+                "buttonText": "#FFFFFF",
+            }
+        if theme == "slate":
+            return {
+                "name": "slate",
+                "bg": "#0F172A",
+                "surface": "#111827",
+                "text": "#E2E8F0",
+                "text2": "#94A3B8",
+                "accent": "#38BDF8",
+                "accentHover": "#0EA5E9",
+                "accentPress": "#0284C7",
+                "fieldBg": "#111827",
+                "fieldBorder": "#1F2937",
+                "success": "#38BDF8",
+                "successHover": "#0EA5E9",
+                "successPress": "#0284C7",
+                "danger": "#EF4444",
+                "dangerHover": "#F87171",
+                "dangerPress": "#B91C1C",
+                "buttonText": "#0B1220",
+            }
+        return {
+            "name": "dark",
+            "bg": "#1E1E1E",
+            "surface": "#2B2B2B",
+            "text": "#FFFFFF",
+            "text2": "#FFFFFF",
+            "accent": "#4A90E2",
+            "accentHover": "#7BAFD4",
+            "accentPress": "#2C5FA5",
+            "fieldBg": "#2B2B2B",
+            "fieldBorder": "#3C3C3C",
+            "success": "#76ABAE",
+            "successHover": "#828786",
+            "successPress": "#5b7f83",
+            "danger": "#A0153E",
+            "dangerHover": "#C49497",
+            "dangerPress": "#7a0f31",
+            "buttonText": "#FFFFFF",
+        }
 
+    def _build_qml_proxy(self, root_obj):
+        def wrap_button(name):
+            obj = root_obj.findChild(QtCore.QObject, name)
+            if obj is None:
+                return None
+            return SimpleNamespace(
+                _obj=obj,
+                clicked=getattr(obj, "clicked", None),
+                setText=lambda v: obj.setProperty("text", v or ""),
+                setVisible=lambda v: obj.setProperty("visible", bool(v)),
+                hide=lambda: obj.setProperty("visible", False),
+                show=lambda: obj.setProperty("visible", True),
+            )
+
+        return SimpleNamespace(
+            create_ro_button=wrap_button("create_ro_button"),
+            edit_appointment_button=wrap_button("edit_appointment_button"),
+            delete_appointment_button=wrap_button("delete_appointment_button"),
+            cancel_appt_options_button=wrap_button("cancel_appt_options_button"),
+        )
+
+    def _open_options_window(self):
+        base_dir = Path(__file__).resolve().parents[1]
+        qml_path = str(base_dir / "qml" / "AppointmentOptions.qml")
+
+        try:
+            palette = self._theme_palette()
+            self.window, root_obj = self.widget_manager.create_or_restore_qml(
+                "appointment_options",
+                qml_path,
+                parent=self.parent,
+                context_properties={
+                    "themePalette": palette,
+                    "themeName": palette.get("name", "dark"),
+                },
+            )
+            self.ui = self._build_qml_proxy(root_obj)
+            self.window.setWindowFlags(
+                QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog
+            )
+            self.window.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+            self.window.setParent(self.parent)
+            self.window.setFocus()
+            return self.ui
+        except Exception:
+            return None
 
     def _setup_ui(self):
-        self.window.setParent(self.parent, QtCore.Qt.WindowType.Dialog)
-        self.window.setWindowFlags(QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog)
-        self.window.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+        form = self._open_options_window()
+        if form is None:
+            return
+
         self.edit_window.setParent(self.parent, QtCore.Qt.WindowType.Dialog)
         self.edit_window.setWindowFlags(QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog)
         self.edit_window.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        self.ui.cancel_appt_options_button.clicked.connect(lambda: self.widget_manager.close_and_delete("appointment_options"))
-        self.ui.delete_appointment_button.clicked.connect(self._delete_appointment)
-        self.ui.edit_appointment_button.clicked.connect(self._edit_calls)
-        self.ui.create_ro_button.hide()
+
+        if form.cancel_appt_options_button and form.cancel_appt_options_button.clicked:
+            form.cancel_appt_options_button.clicked.connect(
+                lambda: self.widget_manager.close_and_delete("appointment_options")
+            )
+        if form.delete_appointment_button and form.delete_appointment_button.clicked:
+            form.delete_appointment_button.clicked.connect(self._delete_appointment)
+        if form.edit_appointment_button and form.edit_appointment_button.clicked:
+            form.edit_appointment_button.clicked.connect(self._edit_calls)
+        if form.create_ro_button:
+            try:
+                form.create_ro_button.hide()
+            except Exception:
+                pass
+
         self.window.show()
 
 

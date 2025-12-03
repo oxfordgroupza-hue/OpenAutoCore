@@ -365,29 +365,3 @@ class GoSidecarManager(QObject):
             args += ["-state", state]
         self._run(args)
 
-class UvicornManager(QObject):
-    debugText = pyqtSignal(str)
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._proc = None
-
-        def ensure_data_folders():
-            for sub in ("data/quotes", "data/orders", "data/returns"):
-                Path(sub).mkdir(parents=True, exist_ok=True)
-
-    def start(self, host="127.0.0.1", port=8000, module="openauto.managers.parts_tree.api_pt_callbacks:app", python=None):
-        if self._proc:
-            return
-        self._proc = QProcess(self)
-        self._proc.setProgram(python or sys.executable)
-        self._proc.setArguments(["-m", "uvicorn", module, "--host", host, "--port", str(port)])
-        self._proc.readyReadStandardError.connect(lambda: self.debugText.emit(bytes(self._proc.readAllStandardError()).decode()))
-        self._proc.readyReadStandardOutput.connect(lambda: self.debugText.emit(bytes(self._proc.readAllStandardOutput()).decode()))
-        self._proc.start()
-
-    def stop(self):
-        if self._proc:
-            self._proc.terminate()
-            self._proc.waitForFinished(2000)
-            self._proc.kill()
-            self._proc = None

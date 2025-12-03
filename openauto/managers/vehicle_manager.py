@@ -1,13 +1,12 @@
 from pathlib import Path
 from PyQt6 import QtWidgets, QtCore
-from openauto.ui import vehicle_search_form
 from pyvin import VIN
 from openauto.utils.validator import Validator
 from openauto.repositories.vehicle_repository import VehicleRepository
 from openauto.repositories.customer_repository import CustomerRepository
 from openauto.managers.belongs_to_manager import BelongsToManager
-from openauto.utils.fixed_popup_combo import FixedPopupCombo
 from openauto.managers.parts_tree.go_sidecar_manager import GoSidecarManager
+from types import SimpleNamespace
 
 
 STATES = [
@@ -31,78 +30,255 @@ class VehicleManager:
         self.ui = main_window
         self.belongs_to_manager = BelongsToManager(main_window)
         self._plate_sidecar = None
+        self._vehicle_root = None
+
+    # --- helpers ---
+    def _form(self):
+        form = getattr(self.ui, "vehicle_window_ui", None)
+        if form is None:
+            self._show_message("Vehicle form is not available.")
+        return form
+
+    def _build_qml_proxy(self, root_obj):
+        def wrap_line(name):
+            obj = root_obj.findChild(QtCore.QObject, name)
+            if obj is None:
+                return None
+            return SimpleNamespace(
+                _obj=obj,
+                text=lambda: obj.property("text") or "",
+                setText=lambda v: obj.setProperty("text", v or ""),
+                clear=lambda: obj.setProperty("text", ""),
+                textChanged=getattr(obj, "textChanged", None),
+                cursorPosition=lambda: obj.property("cursorPosition") or 0,
+                setCursorPosition=lambda pos: obj.setProperty("cursorPosition", pos),
+                setVisible=lambda v: obj.setProperty("visible", bool(v)),
+                hide=lambda: obj.setProperty("visible", False),
+                show=lambda: obj.setProperty("visible", True),
+            )
+
+        def wrap_combo(name):
+            obj = root_obj.findChild(QtCore.QObject, name)
+            if obj is None:
+                return None
+            return SimpleNamespace(
+                _obj=obj,
+                addItems=lambda items: obj.setProperty("model", items),
+                currentText=lambda: obj.property("currentText") or "",
+                setMinimumWidth=lambda _w: None,
+                hide=lambda: obj.setProperty("visible", False),
+                show=lambda: obj.setProperty("visible", True),
+                setObjectName=lambda val: obj.setObjectName(val),
+            )
+
+        def wrap_button(name):
+            obj = root_obj.findChild(QtCore.QObject, name)
+            if obj is None:
+                return None
+            return SimpleNamespace(
+                _obj=obj,
+                clicked=getattr(obj, "clicked", None),
+                setText=lambda v: obj.setProperty("text", v or ""),
+                setMinimumWidth=lambda _w: None,
+                setMaximumWidth=lambda _w: None,
+                setSizePolicy=lambda *args, **kwargs: None,
+                setVisible=lambda v: obj.setProperty("visible", bool(v)),
+                hide=lambda: obj.setProperty("visible", False),
+                show=lambda: obj.setProperty("visible", True),
+            )
+
+        proxy = SimpleNamespace(
+            vin_search_button=wrap_button("vin_search_button"),
+            plate_state_box=wrap_combo("plate_state_box"),
+            plate_line=wrap_line("plate_line"),
+            vin_line=wrap_line("vin_line"),
+            year_line=wrap_line("year_line"),
+            make_line=wrap_line("make_line"),
+            model_line=wrap_line("model_line"),
+            engine_line=wrap_line("engine_line"),
+            trim_line=wrap_line("trim_line"),
+            vehicle_cancel_button=wrap_button("vehicle_cancel_button"),
+            vehicle_save_button=wrap_button("vehicle_save_button"),
+            horizontalLayout=None,
+        )
+        return proxy
+
+    def _theme_palette(self):
+        """Return a palette dict matching the current theme name."""
+        theme = getattr(self.ui, "current_theme", "dark")
+        if theme == "light":
+            return {
+                "name": "light",
+                "bg": "#F5F7FA",
+                "surface": "#FFFFFF",
+                "text": "#1E1E1E",
+                "text2": "#5C5C5C",
+                "accent": "#314455",
+                "accentHover": "#4F6D7A",
+                "accentPress": "#22313F",
+                "fieldBg": "#FFFFFF",
+                "fieldBorder": "#C7CDD3",
+                "divider": "#C7CDD3",
+                "success": "#4A6260",
+                "successHover": "#759093",
+                "successPress": "#314455",
+                "danger": "#C96567",
+                "dangerHover": "#9E5A63",
+                "dangerPress": "#7a0f31",
+                "buttonText": "#FFFFFF",
+                "inputText": "#1E1E1E",
+            }
+        if theme == "slate":
+            return {
+                "name": "slate",
+                "bg": "#0F172A",
+                "surface": "#111827",
+                "text": "#E2E8F0",
+                "text2": "#94A3B8",
+                "accent": "#38BDF8",
+                "accentHover": "#0EA5E9",
+                "accentPress": "#0284C7",
+                "fieldBg": "#111827",
+                "fieldBorder": "#1F2937",
+                "divider": "#1F2937",
+                "success": "#38BDF8",
+                "successHover": "#0EA5E9",
+                "successPress": "#0284C7",
+                "danger": "#EF4444",
+                "dangerHover": "#F87171",
+                "dangerPress": "#B91C1C",
+                "buttonText": "#0B1220",
+                "inputText": "#E2E8F0",
+            }
+        return {
+            "name": "dark",
+            "bg": "#1E1E1E",
+            "surface": "#2B2B2B",
+            "text": "#FFFFFF",
+            "text2": "#FFFFFF",
+            "accent": "#4A90E2",
+            "accentHover": "#7BAFD4",
+            "accentPress": "#2C5FA5",
+            "fieldBg": "#2B2B2B",
+            "fieldBorder": "#3C3C3C",
+            "divider": "#3C3C3C",
+            "success": "#76ABAE",
+            "successHover": "#828786",
+            "successPress": "#5b7f83",
+            "danger": "#A0153E",
+            "dangerHover": "#C49497",
+            "dangerPress": "#7a0f31",
+            "buttonText": "#FFFFFF",
+            "inputText": "#FFFFFF",
+        }
 
     def add_vehicle(self):
         if not self.ui.customer_table.currentItem():
             self._show_message("No Customer Selected, Please Highlight A Customer!")
             return
 
-        self._open_vehicle_form()
-        self.ui.vehicle_window_ui.vin_search_button.clicked.connect(self.search_vehicle)
-        self.ui.vehicle_window_ui.vehicle_save_button.clicked.connect(self.load_customer_id)
+        form = self._open_vehicle_form()
+        if form is None:
+            return
+        form.vin_search_button.clicked.connect(self.search_vehicle)
+        form.vehicle_save_button.clicked.connect(self.load_customer_id)
 
     def _open_vehicle_form(self):
-        self.ui.vehicle_window, self.ui.vehicle_window_ui = self.ui.widget_manager.create_or_restore(
-            "vehicle_window", QtWidgets.QWidget, vehicle_search_form.Ui_vehicle_search_form
-        )
+        base_dir = Path(__file__).resolve().parents[1]
+        qml_path = str(base_dir / "qml" / "VehicleSearch.qml")
 
-        self.ui.vehicle_window.setParent(self.ui, QtCore.Qt.WindowType.Dialog)
-        self.ui.vehicle_window.setWindowFlags(
-            QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog
-        )
+        # QML-only vehicle search form
+        try:
+            palette = self._theme_palette()
+            self.ui.vehicle_window, root_obj = self.ui.widget_manager.create_or_restore_qml(
+                "vehicle_window",
+                qml_path,
+                parent=self.ui,
+                context_properties={
+                    "vehicleManager": self,
+                    "mainWindow": self.ui,
+                    "themePalette": palette,
+                    "themeName": palette.get("name", "dark"),
+                },
+            )
 
+            self._vehicle_root = root_obj
+            self.ui.vehicle_window.setWindowFlags(
+                QtCore.Qt.WindowType.FramelessWindowHint |
+                QtCore.Qt.WindowType.Dialog
+            )
+            self.ui.vehicle_window.setWindowModality(
+                QtCore.Qt.WindowModality.WindowModal
+            )
+            self.ui.vehicle_window.setParent(self.ui)
+            self.ui.vehicle_window.setFocus()
 
+            # Map QML objectNames to a proxy so downstream code can keep using the same attributes.
+            self.ui.vehicle_window_ui = self._build_qml_proxy(root_obj)
+            form = self._form()
+            if form is None:
+                return None
 
-        self.ui.vehicle_window.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        self.ui.vehicle_window.setFocus()
-        
-        btn = self.ui.vehicle_window_ui.vin_search_button
-        btn.setMinimumWidth(120)
-        btn.setMaximumWidth(120)
-        btn.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Fixed,
-            btn.sizePolicy().verticalPolicy(),
-        )
-        
-        layout = self.ui.vehicle_window_ui.horizontalLayout
-        layout.addItem(QtWidgets.QSpacerItem(
-            40, 20,
-            QtWidgets.QSizePolicy.Policy.Expanding,
-            QtWidgets.QSizePolicy.Policy.Minimum,
-        ))
+            # Optional QML-level signals
+            for sig_name, slot in (
+                ("searchRequested", self.search_vehicle),
+                ("saveRequested", self.load_customer_id),
+                ("cancelRequested", lambda: self.ui.widget_manager.close_and_delete("vehicle_window")),
+            ):
+                sig = getattr(root_obj, sig_name, None)
+                if sig is not None:
+                    try:
+                        sig.connect(slot)
+                    except Exception:
+                        pass
 
-        if _ptcli_available():
-            old_box = self.ui.vehicle_window_ui.plate_state_box
-            parent = old_box.parent()
-            layout = parent.layout()
+            # Populate plate state list if present and ptcli is available
+            if _ptcli_available():
+                if form.plate_state_box:
+                    try:
+                        form.plate_state_box.addItems(STATES)
+                        form.plate_state_box.show()
+                    except Exception:
+                        pass
+                if form.plate_line:
+                    try:
+                        form.plate_line.show()
+                    except Exception:
+                        pass
+            else:
+                if form.plate_state_box:
+                    try:
+                        form.plate_state_box.hide()
+                    except Exception:
+                        pass
+                if form.plate_line:
+                    try:
+                        form.plate_line.hide()
+                    except Exception:
+                        pass
 
-            combo = FixedPopupCombo(max_popup_height=200, parent=parent)
-            combo.setObjectName("plate_state_box")
-            combo.addItems(STATES)
+            # Wire cancel + uppercase normalization
+            if form.vehicle_cancel_button and form.vehicle_cancel_button.clicked:
+                try:
+                    form.vehicle_cancel_button.clicked.connect(
+                        lambda: self.ui.widget_manager.close_and_delete("vehicle_window"))
+                except Exception:
+                    pass
+            if form.vin_line and form.vin_line.textChanged:
+                form.vin_line.textChanged.connect(self._enforce_uppercase_vin)
+            if form.plate_line and form.plate_line.textChanged:
+                form.plate_line.textChanged.connect(self._enforce_uppercase_plate)
 
-            layout.replaceWidget(old_box, combo)
-            old_box.deleteLater()
-            self.ui.vehicle_window_ui.plate_state_box = combo
-            self.ui.vehicle_window_ui.plate_state_box.setMinimumWidth(80)
-            self.ui.vehicle_window_ui.plate_line.setVisible(True)
-        else:
-            self.ui.vehicle_window_ui.plate_state_box.hide()
-            try:
-                self.ui.vehicle_window_ui.plate_line.hide()
-            except Exception:
-                pass
-        
-        
-        self.ui.vehicle_window_ui.vehicle_cancel_button.clicked.connect(
-            lambda: self.ui.widget_manager.close_and_delete("vehicle_window"))
-
-        self.ui.vehicle_window_ui.vin_line.textChanged.connect(self._enforce_uppercase_vin)
-        self.ui.vehicle_window_ui.plate_line.textChanged.connect(self._enforce_uppercase_plate)
-
-        self.ui.vehicle_window.show()
+            self.ui.vehicle_window.show()
+            return form
+        except Exception:
+            self._show_message("Unable to load vehicle form.")
+            return None
 
     def search_vehicle(self):
-        form = self.ui.vehicle_window_ui
+        form = self._form()
+        if form is None:
+            return
         vin_text = (form.vin_line.text() or "").strip().upper()
         plate = (form.plate_line.text() or "").strip().upper()
 
@@ -155,6 +331,9 @@ class VehicleManager:
         form.vin_line.clear()
 
     def load_customer_id(self):
+        """Determine the selected customer_id and save the vehicle for that customer."""
+        if self._form() is None:
+            return
         row = self.ui.customer_table.currentRow()
         customer_data = [
             self.ui.customer_table.item(row, col).text() if self.ui.customer_table.item(row, col) else ""
@@ -169,7 +348,9 @@ class VehicleManager:
             self._show_message("Could not find customer ID.")
 
     def save_vehicle(self, customer_id):
-        form = self.ui.vehicle_window_ui
+        form = self._form()
+        if form is None:
+            return
         vehicle_data = [
             form.vin_line.text(),
             form.year_line.text(),
@@ -210,10 +391,13 @@ class VehicleManager:
             self.ui.vehicle_table.setRowHidden(row, not match)
 
     def add_new_vehicle(self):
-        self._open_vehicle_form()
-        self.ui.vehicle_window_ui.vehicle_save_button.setText("Next")
-        self.ui.vehicle_window_ui.vin_search_button.clicked.connect(self.search_vehicle)
-        self.ui.vehicle_window_ui.vehicle_save_button.clicked.connect(self.belongs_to_manager.belongs_to)
+        """Triggered from other workflows (e.g., belongs_to); reuses the same dialog."""
+        form = self._open_vehicle_form()
+        if form is None:
+            return
+        form.vehicle_save_button.setText("Next")
+        form.vin_search_button.clicked.connect(self.search_vehicle)
+        form.vehicle_save_button.clicked.connect(self.belongs_to_manager.belongs_to)
 
     def _show_message(self, text):
         msg = getattr(self.ui, "message", None)
@@ -230,22 +414,39 @@ class VehicleManager:
         msg.setText(text)
         msg.show()
 
-    def _enforce_uppercase_vin(self, text):
-        cleaned = (text or "").replace(" ", "").upper()
-        le = self.ui.vehicle_window_ui.vin_line
-        cursor_pos = le.cursorPosition()
-        le.setText(cleaned)
-        le.setCursorPosition(min(cursor_pos, len(cleaned)))
+    #Normalize VIN INPUT TO UPPERCASE AN NO SPACES
+    def _enforce_uppercase_vin(self, text=None):
+        form = self._form()
+        if form is None:
+            return
+        # If the signal did not pass text (e.g., QML), fall back to current field text.
+        current = text if text is not None else getattr(form.vin_line, "text", lambda: "")()
+        cleaned = (current or "").replace(" ", "").upper()
+        le = form.vin_line
+        try:
+            cursor_pos = le.cursorPosition()
+            le.setText(cleaned)
+            le.setCursorPosition(min(cursor_pos, len(cleaned)))
+        except Exception:
+            le.setText(cleaned)
         
-    def _enforce_uppercase_plate(self, text):
-        cleaned = (text or "").replace(" ", "").upper()
-        le = self.ui.vehicle_window_ui.plate_line
-        cursor_pos = le.cursorPosition()
-        le.setText(cleaned)
-        le.setCursorPosition(min(cursor_pos, len(cleaned)))
+    #NORMALIZE PLATE INPUT TO UPPERCASE AN NO SPACES
+    def _enforce_uppercase_plate(self, text=None):
+        form = self._form()
+        if form is None:
+            return
+        current = text if text is not None else getattr(form.plate_line, "text", lambda: "")()
+        cleaned = (current or "").replace(" ", "").upper()
+        le = form.plate_line
+        try:
+            cursor_pos = le.cursorPosition()
+            le.setText(cleaned)
+            le.setCursorPosition(min(cursor_pos, len(cleaned)))
+        except Exception:
+            le.setText(cleaned)
 
     def _on_plate_decoded(self, payload: dict):
-        form = getattr(self.ui, "vehicle_window_ui", None)
+        form = self._form()
         vw = getattr(self.ui, "vehicle_window", None)
         try:
             if form is None or vw is None or not vw.isVisible():

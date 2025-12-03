@@ -8,6 +8,7 @@ from openauto.repositories import (customer_repository, vehicle_repository,
 from PyQt6.QtCore import QPoint, QRect, QEasingCurve, QPropertyAnimation, QSequentialAnimationGroup, QParallelAnimationGroup, QPauseAnimation, QEvent
 from PyQt6 import QtWidgets
 from PyQt6.QtWidgets import QGraphicsOpacityEffect
+from PyQt6.QtQuickWidgets import QQuickWidget
 from queue import Queue, Empty
 
 
@@ -381,8 +382,7 @@ class WidgetManager:
     def __init__(self):
         self.widgets = {}
 
-    def create_or_restore(self, key, widget_class, ui_class, *args, **kwargs):
-        # If widget exists and hasn't been deleted, delete it
+    def _reset_existing(self, key: str):
         if key in self.widgets and self.widgets[key] is not None:
             try:
                 self.widgets[key].close()
@@ -391,7 +391,9 @@ class WidgetManager:
                 pass
             self.widgets[key] = None
 
-        # Create new widget
+    def create_or_restore(self, key, widget_class, ui_class, *args, **kwargs):
+        self._reset_existing(key)
+
         widget = widget_class(*args, **kwargs)
         widget.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
         ui = ui_class()
@@ -400,12 +402,33 @@ class WidgetManager:
         self.widgets[key] = widget
         return widget, ui
 
+    def create_or_restore_qml(self, key: str, qml_source: str, *, parent=None, context_properties=None):
+        self._reset_existing(key)
+
+        qml_widget = QQuickWidget(parent)
+        qml_widget.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+        qml_widget.setResizeMode(QQuickWidget.ResizeMode.SizeRootObjectToView)
+
+        if context_properties:
+            ctx = qml_widget.rootContext()
+            for name, value in context_properties.items():
+                ctx.setContextProperty(name, value)
+
+        url = QtCore.QUrl(qml_source)
+        if not url.isValid() or url.scheme() == "":
+            url = QtCore.QUrl.fromLocalFile(qml_source)
+
+        qml_widget.setSource(url)
+
+        if qml_widget.status() == QQuickWidget.Status.Error:
+            errs = [str(e.toString()) for e in qml_widget.errors()]
+            raise RuntimeError(f"Failed to load QML '{qml_source}': {errs}")
+
+        self.widgets[key] = qml_widget
+        return qml_widget, qml_widget.rootObject()
+
     def get_widget(self, key):
         return self.widgets.get(key, None)
 
     def close_and_delete(self, key):
-        if key in self.widgets and self.widgets[key] is not None:
-            self.widgets[key].close()
-            self.widgets[key].deleteLater()
-            self.widgets[key] = None
-
+        self._reset_existing(key)

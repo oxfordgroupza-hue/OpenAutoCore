@@ -164,6 +164,8 @@ class ROHubManager(QtCore.QObject):
             lambda: self._sync_approval_to_db_and_refresh(getattr(self.ui, "current_ro_id", None) or 0))
 
         self.ui.ro_items_table.jobsChanged.connect(self._reload_after_job_change)
+        self.ui.ro_items_table.jobsChanged.connect(
+            lambda: self._refresh_payments_button(getattr(self.ui, "current_ro_id", None)))
 
 
 
@@ -211,6 +213,9 @@ class ROHubManager(QtCore.QObject):
         # add/remove item buttons
         self.ui.add_job_item_button.clicked.connect(self.autosaver.mark_dirty)
         self.ui.remove_item_button.clicked.connect(self.autosaver.mark_dirty)
+        self.ui.remove_item_button.clicked.connect(
+            lambda: self._refresh_payments_button(getattr(self.ui, "current_ro_id", None))
+        )
 
         # new job button
         self.ui.new_job_button.clicked.connect(self.autosaver.mark_dirty)
@@ -281,6 +286,7 @@ class ROHubManager(QtCore.QObject):
         vin = (self.ui.vehcle_line.text() or "").split()[0] if self.ui.vehcle_line.text() else ""
         self.roContextReady.emit(ro_id, int(est_id), vin)
         self._update_ro_status_label(ro_id)
+        self._refresh_payments_button(ro_id)
         self.status.refresh_button()
         try: self.autosaver.resume()
         except Exception: pass
@@ -525,6 +531,7 @@ class ROHubManager(QtCore.QObject):
 
         RepairOrdersRepository.recompute_ro_approval(ro_id)
         self._update_ro_status_label(ro_id)
+        self._refresh_payments_button(ro_id)
         self.status.refresh_button()
 
 
@@ -580,6 +587,34 @@ class ROHubManager(QtCore.QObject):
         style.unpolish(label)
         style.polish(label)
 
+
+    # Hide payments button unless all jobs are approved/declined
+    def _refresh_payments_button(self, ro_id: int | None):
+        btn = getattr(self.ui, "payments_button", None)
+        if not btn:
+            return
+
+        try:
+            model = self.ui.ro_items_table.model()
+            root = QtCore.QModelIndex()
+            rows = model.rowCount(root)
+            if rows == 0:
+                btn.hide()
+                return
+            for r in range(rows):
+                job_idx = model.index(r, 0, root)
+                approved = bool(job_idx.data(APPROVED_ROLE))
+                declined = bool(job_idx.data(DECLINED_ROLE))
+                # Any job without an explicit decision keeps the button hidden.
+                if not (approved or declined):
+                    btn.hide()
+                    return
+            # All jobs in the view are reviewed
+            btn.show()
+        except Exception:
+            btn.hide()
+            
+
     def connect_ro_model_signals(self, model):
         if getattr(model, "_oa_mark_dirty_wired", False):
             return
@@ -608,5 +643,9 @@ class ROHubManager(QtCore.QObject):
         try:
             self.ui.current_estimate_id = int(est_id)
             self.ui.ro_items_table.current_estimate_id = int(est_id)
+        except Exception:
+            pass
+        try:
+            self._refresh_payments_button(getattr(self.ui, "current_ro_id", None))
         except Exception:
             pass

@@ -1,16 +1,14 @@
-import os
-from fastapi import FastAPI, Request, Response
-from pathlib import Path
+import os, json, hashlib, tempfile, time
 from datetime import datetime
-import json, hashlib, tempfile, time
+from pathlib import Path
+from fastapi import Request, Response
 
 from openauto.repositories.parts_tree_repository import PartsTreeRepository
 from openauto.repositories.db_handlers import connect_db
 from openauto.managers.parts_tree.sessions_cache import SessionsCache
-
+from . import app
 
 sessions = SessionsCache()
-app = FastAPI()
 BASE_DIR = Path(__file__).resolve().parent
 DATA_ROOT = Path(os.getenv("OPENAUTO_DATA_DIR", BASE_DIR / "data"))
 _LAST_HASH_BY_SESSION: dict[str, tuple[float, str]] = {}

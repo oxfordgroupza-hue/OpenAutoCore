@@ -27,6 +27,7 @@ class AptCalendar(QCalendarWidget):
 class WeeklySchedule(QTableWidget):
     add_appointment = pyqtSignal()
     appointment_options = pyqtSignal(int)
+    day_selected = pyqtSignal(QDate)
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setColumnCount(7)
@@ -43,6 +44,7 @@ class WeeklySchedule(QTableWidget):
         self.verticalHeader().setDefaultSectionSize(50)
         self.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.horizontalHeader().sectionClicked.connect(self.header_clicked)
         self.load_appointments(QDate.currentDate())
         self.cellClicked.connect(self.date_clicked)
 
@@ -67,7 +69,7 @@ class WeeklySchedule(QTableWidget):
             col = date.dayOfWeek() - 1  # Monday = 0
 
             if 0 <= row < self.rowCount() and 0 <= col < self.columnCount():
-                name = f"{appt['first_name']} {appt['last_name']},   {appt["notes"]}, {appt["dropoff_type"]}"
+                name = f"{appt['first_name']} {appt['last_name']},   {appt['notes']}, {appt['dropoff_type']}"
                 item = QtWidgets.QTableWidgetItem(name)
                 item.setData(QtCore.Qt.ItemDataRole.UserRole, appt)  # store metadata
                 self.setItem(row, col, item)
@@ -81,11 +83,20 @@ class WeeklySchedule(QTableWidget):
         labels = [f"{d.toString('ddd')} {d.toString('MM/dd')}" for d in self.week_dates]
         self.setHorizontalHeaderLabels(labels)
 
+    def header_clicked(self, section: int):
+        if not hasattr(self, "week_dates"):
+            return
+
+        if 0 <= section < len(self.week_dates):
+            selected = self.week_dates[section]
+            self.selected_date = selected
+            self.day_selected.emit(selected)
 
     def date_clicked(self, row, column):
         self.selected_row = row
         self.selected_column = column
         self.selected_date = self.week_dates[column]  # assumes horizontal headers already set
+        self.day_selected.emit(self.selected_date)
 
         item = self.item(row, column)
         if item is None or item.text().strip() == "":
@@ -138,7 +149,7 @@ class HourlySchedule(QTableWidget):
 
             row = (hour - 7) * 2 + (1 if minute >= 30 else 0)
             if 0 <= row < self.rowCount():
-                summary = f"{appt['first_name']} {appt['last_name']} - {appt["notes"]}, {appt["dropoff_type"]}"
+                summary = f"{appt['first_name']} {appt['last_name']} - {appt['notes']}, {appt['dropoff_type']}"
                 item = QtWidgets.QTableWidgetItem(summary)
                 item.setData(QtCore.Qt.ItemDataRole.UserRole, appt)
                 self.setItem(row, 0, item)
@@ -156,4 +167,3 @@ class HourlySchedule(QTableWidget):
             if appointment_data:
                 appt_id = appointment_data.get("id")
                 self.edit_appointment.emit(appt_id)
-

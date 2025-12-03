@@ -13,7 +13,7 @@ from openauto.managers.ro_hub.save_estimate_service import SaveEstimateService
 from openauto.repositories.repair_orders_repository import RepairOrdersRepository
 from openauto.repositories.estimates_repository import EstimatesRepository
 from openauto.managers.parts_tree.parts_item_controller import PartsItemController
-from openauto.managers.parts_tree import api_pt_callbacks
+from openauto.callbacks import api_pt_callbacks
 from dotenv import load_dotenv
 import re
 import os

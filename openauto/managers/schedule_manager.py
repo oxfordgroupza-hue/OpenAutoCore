@@ -4,6 +4,7 @@ from openauto.ui import new_ro
 from openauto.subclassed_widgets.views import small_tables
 
 
+
 class ScheduleManager:
     def __init__(self, main_window):
         self.ui = main_window

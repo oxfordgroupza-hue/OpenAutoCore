@@ -21,6 +21,10 @@ class ThemeManager:
         self.theme, self.theme_ui = self.widget_manager.create_or_restore(
             "theme", QtWidgets.QWidget, theme.Ui_Form)
 
+        self.theme_ui.canonical_radiobutton = QtWidgets.QRadioButton()
+        self.theme_ui.canonical_radiobutton.setText("Canonical Theme")
+        self.theme_ui.horizontalLayout.addWidget(self.theme_ui.canonical_radiobutton)
+        
         self._setup_ui()
 
 
@@ -48,6 +52,8 @@ class ThemeManager:
         style = self.ui.style()
         light_theme = "theme/light_theme.qss"
         dark_theme = "theme/dark_theme.qss"
+        slate_theme = "theme/slate_theme.qss"
+        canonical_theme = "theme/canonical_theme.qss"
 
         if self.theme_ui.light_radiobutton.isChecked():
             chosen = "light"
@@ -61,6 +67,20 @@ class ThemeManager:
             pixmap = QtGui.QPixmap(":/resources/OpenAuto_Icons_48x48_dark_light/mainwindow_icon/dark_theme_logo.png")
             style.unpolish(self.ui)
             apply_stylesheet(self.ui, dark_theme)
+            style.polish(self.ui)
+        
+        elif self.theme_ui.slate_radiobutton.isChecked():
+            chosen = "slate"
+            pixmap = QtGui.QPixmap(":/resources/OpenAuto_Icons_48x48_dark_light/mainwindow_icon/light_theme_logo.png")
+            style.unpolish(self.ui)
+            apply_stylesheet(self.ui, slate_theme)
+            style.polish(self.ui)
+            
+        elif self.theme_ui.canonical_radiobutton.isChecked():
+            chosen = "canonical"
+            pixmap = QtGui.QPixmap(":/resources/OpenAuto_Icons_48x48_dark_light/mainwindow_icon/dark_theme_logo.png")
+            style.unpolish(self.ui)
+            apply_stylesheet(self.ui, canonical_theme)
             style.polish(self.ui)
 
         else:

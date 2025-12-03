@@ -1,16 +1,189 @@
+from pathlib import Path
+from types import SimpleNamespace
 from PyQt6 import QtCore, QtWidgets
-from openauto.ui import customer_search_form, new_customer_form
 from openauto.utils.validator import Validator
 from openauto.repositories.customer_repository import CustomerRepository
 from openauto.repositories.vehicle_repository import VehicleRepository
 from openauto.repositories import vehicle_repository
-from openauto.utils.fixed_popup_combo import FixedPopupCombo
+from openauto.managers.customer_manager import CustomerManager
 
 class BelongsToManager:
     def __init__(self, main_window, vehicle_id=None):
         self.ui = main_window
         self.vehicle_id = vehicle_id
-### OPENS customer_search PYUIC FILE ###
+
+    def _theme_palette(self):
+        theme = getattr(self.ui, "current_theme", "dark")
+        if theme == "light":
+            return {
+                "name": "light",
+                "bg": "#F5F7FA",
+                "surface": "#FFFFFF",
+                "text": "#1E1E1E",
+                "text2": "#5C5C5C",
+                "accent": "#314455",
+                "accentHover": "#4F6D7A",
+                "accentPress": "#22313F",
+                "fieldBg": "#FFFFFF",
+                "fieldBorder": "#C7CDD3",
+                "success": "#4A6260",
+                "successHover": "#759093",
+                "successPress": "#314455",
+                "danger": "#C96567",
+                "dangerHover": "#9E5A63",
+                "dangerPress": "#7a0f31",
+                "buttonText": "#FFFFFF",
+                "inputText": "#1E1E1E",
+            }
+        if theme == "slate":
+            return {
+                "name": "slate",
+                "bg": "#0F172A",
+                "surface": "#111827",
+                "text": "#E2E8F0",
+                "text2": "#94A3B8",
+                "accent": "#38BDF8",
+                "accentHover": "#0EA5E9",
+                "accentPress": "#0284C7",
+                "fieldBg": "#111827",
+                "fieldBorder": "#1F2937",
+                "success": "#38BDF8",
+                "successHover": "#0EA5E9",
+                "successPress": "#0284C7",
+                "danger": "#EF4444",
+                "dangerHover": "#F87171",
+                "dangerPress": "#B91C1C",
+                "buttonText": "#0B1220",
+                "inputText": "#E2E8F0",
+            }
+        return {
+            "name": "dark",
+            "bg": "#1E1E1E",
+            "surface": "#2B2B2B",
+            "text": "#FFFFFF",
+            "text2": "#FFFFFF",
+            "accent": "#4A90E2",
+            "accentHover": "#7BAFD4",
+            "accentPress": "#2C5FA5",
+            "fieldBg": "#2B2B2B",
+            "fieldBorder": "#3C3C3C",
+            "success": "#76ABAE",
+            "successHover": "#828786",
+            "successPress": "#5b7f83",
+            "danger": "#A0153E",
+            "dangerHover": "#C49497",
+            "dangerPress": "#7a0f31",
+            "buttonText": "#FFFFFF",
+            "inputText": "#FFFFFF",
+        }
+
+    def _build_qml_proxy(self, root_obj):
+        def wrap_button(name):
+            obj = root_obj.findChild(QtCore.QObject, name)
+            if obj is None:
+                return None
+            return SimpleNamespace(
+                _obj=obj,
+                clicked=getattr(obj, "clicked", None),
+                setText=lambda v: obj.setProperty("text", v or ""),
+            )
+
+        def wrap_line(name):
+            obj = root_obj.findChild(QtCore.QObject, name)
+            if obj is None:
+                return None
+            return SimpleNamespace(
+                _obj=obj,
+                text=lambda: obj.property("text") or "",
+                setText=lambda v: obj.setProperty("text", v or ""),
+                setPlaceholderText=lambda v: obj.setProperty("placeholderText", v or ""),
+                textChanged=getattr(obj, "textChanged", None),
+            )
+
+        def wrap_combo(name):
+            obj = root_obj.findChild(QtCore.QObject, name)
+            if obj is None:
+                return None
+
+            items = []
+
+            def clear():
+                items.clear()
+                obj.setProperty("model", [])
+
+            def addItem(text, data=None):
+                items.append((text, data))
+                obj.setProperty("model", [t for t, _ in items])
+
+            def currentData():
+                index = obj.property("currentIndex")
+                try:
+                    index = int(index)
+                except Exception:
+                    index = -1
+                if index is None or index < 0 or index >= len(items):
+                    return None
+                return items[index][1]
+
+            def currentText():
+                return obj.property("currentText") or ""
+
+            def count():
+                return len(items)
+
+            def itemText(idx):
+                return items[idx][0]
+
+            def itemData(idx):
+                return items[idx][1]
+
+            return SimpleNamespace(
+                _obj=obj,
+                clear=clear,
+                addItem=addItem,
+                currentData=currentData,
+                currentText=currentText,
+                count=count,
+                itemText=itemText,
+                itemData=itemData,
+            )
+
+        return SimpleNamespace(
+            customer_search_edit=wrap_line("customer_search_edit"),
+            customer_name_box=wrap_combo("customer_name_box"),
+            belongs_to_label=root_obj.findChild(QtCore.QObject, "belongs_to_label"),
+            confirm_customer_search_button=wrap_button("confirm_customer_search_button"),
+            cancel_customer_search_button=wrap_button("cancel_customer_search_button"),
+            add_customer_button=wrap_button("add_customer_button"),
+        )
+
+    def _open_customer_search(self, key="belongs_to"):
+        base_dir = Path(__file__).resolve().parents[1]
+        qml_path = str(base_dir / "qml" / "BelongsTo.qml")
+
+        palette = self._theme_palette()
+        window, root_obj = self.ui.widget_manager.create_or_restore_qml(
+            key,
+            qml_path,
+            parent=self.ui,
+            context_properties={
+                "themePalette": palette,
+                "themeName": palette.get("name", "dark"),
+            },
+        )
+        self.ui.belongs_to_window = window
+        self.ui.belongs_to_window_ui = self._build_qml_proxy(root_obj)
+
+        window.setWindowFlags(
+            QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog
+        )
+        window.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+        window.setParent(self.ui)
+        window.setFixedSize(636, 256)
+        window.setFocus()
+        return self.ui.belongs_to_window_ui
+
+    ### OPENS customer_search QML WINDOW ###
     def belongs_to(self):
         form = self.ui.vehicle_window_ui
 
@@ -23,36 +196,13 @@ class BelongsToManager:
             Validator.show_validation_error(self.ui.message, "Please decode VIN or enter Year, Make, and Model")
             return
 
-        self.ui.belongs_to_window, self.ui.belongs_to_window_ui = self.ui.widget_manager.create_or_restore(
-            "belongs_to", QtWidgets.QWidget, customer_search_form.Ui_customer_search_form
-        )
-
-        self.ui.belongs_to_window.setParent(self.ui, QtCore.Qt.WindowType.Dialog)
-        self.ui.belongs_to_window.setWindowFlags(
-            QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog
-        )
-
-        self.ui.belongs_to_window.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-
-        self.ui.belongs_to_window.setFixedSize(636, 256)
+        self._open_customer_search("belongs_to")
 
         self.ui.belongs_to_window_ui.cancel_customer_search_button.clicked.connect(
             lambda: self.ui.widget_manager.close_and_delete("belongs_to"))
 
-        self.ui.belongs_to_window_ui.customer_search_edit.setPlaceholderText("Search ...")
-        self.ui.belongs_to_window_ui.customer_search_edit.textChanged.connect(self.customer_combo_filter)
-        
-        old = self.ui.belongs_to_window_ui.customer_name_box
-        parent = old.parent()
-        layout = parent.layout()
-        
-        combo = FixedPopupCombo(max_popup_height=200, parent=parent)
-        combo.setObjectName("customer_name_box")
-        
-        layout.replaceWidget(old, combo)
-        old.deleteLater()
-        
-        self.ui.belongs_to_window_ui.customer_name_box = combo
+        if self.ui.belongs_to_window_ui.customer_search_edit and self.ui.belongs_to_window_ui.customer_search_edit.textChanged:
+            self.ui.belongs_to_window_ui.customer_search_edit.textChanged.connect(self.customer_combo_filter)
         self.ui.vehicle_window.hide()
         self.name_box_items()
         self.ui.belongs_to_window.show()
@@ -99,32 +249,12 @@ class BelongsToManager:
         self._close_windows(["vehicle_window", "belongs_to"])
 
 
-### LOADS customer_search_form.py FOR ADDING NEW CUSTOMER WITH VEHICLE ###
+    ### LOADS CUSTOMER SEARCH WINDOW FOR ADDING NEW CUSTOMER WITH VEHICLE ###
     def join_vehicle_customer(self):
-        self.ui.show_new_customer_page, self.ui.show_new_customer_page_ui = self.ui.widget_manager.create_or_restore(
-            "new_customer", QtWidgets.QWidget, new_customer_form.Ui_create_customer_form
-        )
-
-        self.ui.show_new_customer_page.setParent(self.ui, QtCore.Qt.WindowType.Dialog)
-        self.ui.show_new_customer_page.setWindowFlags(
-            QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog
-        )
-
-        self.ui.show_new_customer_page.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-
-        self.ui.show_new_customer_page_ui.cancel_customer_button.clicked.connect(
-            lambda: self.ui.widget_manager.close_and_delete("new_customer"))
-
-        self.ui.show_new_customer_page_ui.edit_customer_button.hide()
-        self.ui.show_new_customer_page.setWindowTitle("New Customer")
-        self.ui.show_new_customer_page_ui.first_name_line.setFocus()
-        self.ui.show_new_customer_page.setFixedSize(606, 693)
-        self.ui.show_new_customer_page_ui.phone_line.setInputMask('(000) 000-0000;_')
-
-
+        # Use shared NewCustomer dialog; on save attach the new vehicle
+        cm = CustomerManager(self.ui)
+        cm.open_new_customer(on_saved=self.save_cust_vehc_join)
         self.ui.belongs_to_window.hide()
-        self.ui.show_new_customer_page.show()
-        self.ui.show_new_customer_page_ui.save_customer_button.clicked.connect(self.save_cust_vehc_join)
 
 ### CREATES NEW CUSTOMER AND ADDS NEW VEHICLE ASSOCIATED WITH THEM ###
     def save_cust_vehc_join(self):
@@ -192,36 +322,13 @@ class BelongsToManager:
 
 ### CHANGES VEHICLE OWNER TO A DIFFERENT EXISTING CUSTOMER ###
     def belongs_to_cust_change(self):
-        self.ui.belongs_to_window, self.ui.belongs_to_window_ui = self.ui.widget_manager.create_or_restore(
-            "belongs_to", QtWidgets.QWidget, customer_search_form.Ui_customer_search_form
-        )
-
-        self.ui.belongs_to_window.setParent(self.ui, QtCore.Qt.WindowType.Dialog)
-        self.ui.belongs_to_window.setWindowFlags(
-            QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog
-        )
-
-        self.ui.belongs_to_window.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-
-        self.ui.belongs_to_window.setFixedSize(636, 256)
+        self._open_customer_search("belongs_to")
 
         self.ui.belongs_to_window_ui.cancel_customer_search_button.clicked.connect(
             lambda: self.ui.widget_manager.close_and_delete("belongs_to"))
 
-        self.ui.belongs_to_window_ui.customer_search_edit.setPlaceholderText("Search ...")
-        self.ui.belongs_to_window_ui.customer_search_edit.textChanged.connect(self.customer_combo_filter)
-
-        old = self.ui.belongs_to_window_ui.customer_name_box
-        parent = old.parent()
-        layout = parent.layout()
-        
-        combo = FixedPopupCombo(max_popup_height=200, parent=parent)
-        combo.setObjectName("customer_name_box")
-        
-        layout.replaceWidget(old, combo)
-        old.deleteLater()
-        
-        self.ui.belongs_to_window_ui.customer_name_box = combo
+        if self.ui.belongs_to_window_ui.customer_search_edit and self.ui.belongs_to_window_ui.customer_search_edit.textChanged:
+            self.ui.belongs_to_window_ui.customer_search_edit.textChanged.connect(self.customer_combo_filter)
 
         self.name_box_items()
         self.ui.belongs_to_window_ui.confirm_customer_search_button.clicked.connect(self.change_vehicle_owner)
@@ -247,7 +354,14 @@ class BelongsToManager:
         message_box.exec()
 
 
-    def customer_combo_filter(self, text):
+    def customer_combo_filter(self, text=None):
+        # Support both QWidget (text passed from signal) and QML (no arg)
+        if text is None:
+            try:
+                text = self.ui.belongs_to_window_ui.customer_search_edit.text()
+            except Exception:
+                text = ""
+
         original_items = getattr(self, "_original_customer_items", None)
 
         # First time run: store all items
@@ -259,41 +373,20 @@ class BelongsToManager:
             ]
             original_items = self._original_customer_items
 
+        text = text.lower()
+
         combo = self.ui.belongs_to_window_ui.customer_name_box
         combo.clear()
-
-        text = text.lower()
 
         for display_text, user_data in original_items:
             if text in display_text.lower():
                 combo.addItem(display_text, user_data)
 
     def new_vehicle_owner(self):
-        self.ui.show_new_customer_page, self.ui.show_new_customer_page_ui = self.ui.widget_manager.create_or_restore(
-            "new_customer", QtWidgets.QWidget, new_customer_form.Ui_create_customer_form
-        )
-
-        self.ui.show_new_customer_page.setParent(self.ui, QtCore.Qt.WindowType.Dialog)
-
-        self.ui.show_new_customer_page.setWindowFlags(
-            QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog
-        )
-
-        self.ui.show_new_customer_page.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-
-        self.ui.show_new_customer_page_ui.cancel_customer_button.clicked.connect(
-            lambda: self.ui.widget_manager.close_and_delete("new_customer"))
-
-        self.ui.show_new_customer_page_ui.edit_customer_button.hide()
-        self.ui.show_new_customer_page.setWindowTitle("New Customer")
-        self.ui.show_new_customer_page_ui.first_name_line.setFocus()
-        self.ui.show_new_customer_page.setFixedSize(606, 693)
-        self.ui.show_new_customer_page_ui.phone_line.setInputMask('(000) 000-0000;_')
-
-
+        # Use shared NewCustomer dialog; on save change owner to new customer
+        cm = CustomerManager(self.ui)
+        cm.open_new_customer(on_saved=self.new_cust_old_vehc)
         self.ui.belongs_to_window.hide()
-        self.ui.show_new_customer_page.show()
-        self.ui.show_new_customer_page_ui.save_customer_button.clicked.connect(self.new_cust_old_vehc)
 
 
     def new_cust_old_vehc(self):

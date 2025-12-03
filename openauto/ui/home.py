@@ -13,7 +13,8 @@ from openauto.managers import (
     theme_manager, permissions_manager)
 from openauto.managers.appointments import appointments_manager
 from openauto.managers.analytics import analytics_manager
-from openauto.managers.parts_tree.go_sidecar_manager import UvicornManager
+from openauto.managers.uvicorn_manager import UvicornManager
+from openauto.managers.payments_manager import payments_manager
 from pyvin import VIN
 import os
 
@@ -21,6 +22,9 @@ import os
 THEME_FILES = {
     "light": "theme/light_theme.qss",
     "dark":  "theme/dark_theme.qss",
+    "slate": "theme/slate_theme.qss",
+    "system": "theme/light_theme.qss",  # fallback for system theme support
+    "canonical": "theme/canonical_theme.qss",
 }
 
 
@@ -44,9 +48,9 @@ class MainWindow(QtWidgets.QMainWindow, main_form.Ui_MainWindow):
     def __init__(self, current_user=None):
         super().__init__()
         self.current_user = current_user
+        self.use_qml_cmenu = True
         self.setupUi(self)
         self.cmenu_frame.setMinimumWidth(60)
-        self.cmenu_frame.setMaximumWidth(60)
         self.print_menu = QtWidgets.QMenu(self.print_ro_button)
         sp = self.cmenu_frame.sizePolicy()
         sp.setHorizontalPolicy(QtWidgets.QSizePolicy.Policy.Fixed)
@@ -59,8 +63,10 @@ class MainWindow(QtWidgets.QMainWindow, main_form.Ui_MainWindow):
         self._init_managers()
         self._init_validators()
         self._init_tables()
+        self._add_subclassed_widgets_to_layout()
         self._init_state()
         self._connect_signals()
+        self._init_cmenu_qml_bindings()
         self._set_privileges()
         self._setup_animations()
      #   self._set_all_buttons_flat(False)
@@ -88,6 +94,7 @@ class MainWindow(QtWidgets.QMainWindow, main_form.Ui_MainWindow):
         self.log_console = LogConsole(self)
         self.parts_hub_manager = parts_hub_manager.PartsHubManager(self)
         self.analytics_manager = analytics_manager.AnalyticsManager(self)
+        self.payments_manager = payments_manager.PaymentsManager(self)
 
 
 
@@ -118,8 +125,8 @@ class MainWindow(QtWidgets.QMainWindow, main_form.Ui_MainWindow):
 
 
 
-### ADD ALL SUBCLASSED WIDGETS TO LAYOUT ###
-
+    ### ADD ALL SUBCLASSED WIDGETS TO LAYOUT ###
+    def _add_subclassed_widgets_to_layout(self):
         self.gridLayout_2.setContentsMargins(0, 0, 0, 0)
         self.gridLayout_2.addWidget(self.log_console, 4, 1, 1, 2)
         self.gridLayout_11.addWidget(self.customer_table, 0, 0, 1, 1)
@@ -136,6 +143,54 @@ class MainWindow(QtWidgets.QMainWindow, main_form.Ui_MainWindow):
         self.gridLayout_47.addWidget(self.tax_table, 1, 0, 1, 2)
         # self.gridLayout_50.setSpacing(0)
         # self.gridLayout_50.setContentsMargins(0, 0, 0, 0)
+
+
+    #QML BINDINGS FOR CONTROL MENU IF ENABLED ###
+    def _init_cmenu_qml_bindings(self):
+        if not getattr(self, "use_qml_cmenu", False):
+            return
+
+        cmenu = getattr(self, "cmenu_frame", None)
+        if cmenu is None:
+            return
+
+        qml_widget = getattr(cmenu, "_qml", None)
+        if qml_widget is None:
+            return
+
+        root_obj = qml_widget.rootObject()
+        if root_obj is None:
+            return
+
+        names = [
+            "repair_orders_button", "customers_button", "vehicles_button",
+            "messaging_button", "scheduling_button", "analytics_button",
+            "settings_button", "quit_button",
+        ]
+
+        for name in names:
+            qt_btn = getattr(self, name, None)
+            if qt_btn is None:
+                continue
+
+            # Hide the original widget button; we will drive its slots programmatically.
+            try:
+                qt_btn.hide()
+            except Exception:
+                pass
+
+            qml_btn = root_obj.findChild(QtCore.QObject, name)
+            if qml_btn is None:
+                continue
+
+            clicked = getattr(qml_btn, "clicked", None)
+            if clicked is None:
+                continue
+
+            try:
+                clicked.connect(qt_btn.click)
+            except Exception:
+                pass
 
 ### Add page to hub_stacked_widget for the internet browser and declare it early. URL's are changed on demand.
     def _init_quote_page(self):
@@ -196,7 +251,7 @@ class MainWindow(QtWidgets.QMainWindow, main_form.Ui_MainWindow):
         self.uvicorn_manager.start(
             host="127.0.0.1",
             port=8000,
-            module="openauto.managers.parts_tree.api_pt_callbacks:app",
+            module="openauto.callbacks:app",
             python=None
         )
         self.ro_approved_edit.setButtonSymbols(QtWidgets.QAbstractSpinBox.ButtonSymbols.NoButtons)
@@ -204,11 +259,11 @@ class MainWindow(QtWidgets.QMainWindow, main_form.Ui_MainWindow):
         self.show_all_ro_button.hide()
         self.sku_edit.sizePolicy().setRetainSizeWhenHidden(True)
         self.cost_edit.sizePolicy().setRetainSizeWhenHidden(True)
-        self.estimates_button.setMaximumWidth(400)
-        self.approved_button.setMaximumWidth(400)
-        self.working_ro_button.setMaximumWidth(400)
-        self.checkout_button.setMaximumWidth(400)
-        self.new_ro_button.setMaximumWidth(400)
+        self.estimates_button.setMaximumWidth(300)
+        self.approved_button.setMaximumWidth(300)
+        self.working_ro_button.setMaximumWidth(300)
+        self.checkout_button.setMaximumWidth(300)
+        self.new_ro_button.setMaximumWidth(300)
         self.search_customer_line.setPlaceholderText("Search ...")
         self.vehicle_search_line.setPlaceholderText("Search ...")
         self.ro_search_edit.setPlaceholderText("Search ...")
@@ -256,7 +311,7 @@ class MainWindow(QtWidgets.QMainWindow, main_form.Ui_MainWindow):
         self.import_logo_button.clicked.connect(self.settings_manager.load_shop_logo)
         self.new_ro_button.clicked.connect(self.new_ro_manager.add_repair_order)
         self.scheduling_button.clicked.connect(self.animations_manager.show_schedule)
-        self.week_button.hide()
+        # self.week_button.hide()
         self.month_button.clicked.connect(self.animations_manager.show_schedule)
         self.analytics_button.clicked.connect(self.animations_manager.show_analytics)
         self.analytics_yesterday_button.clicked.connect(
@@ -271,11 +326,15 @@ class MainWindow(QtWidgets.QMainWindow, main_form.Ui_MainWindow):
             lambda: self.analytics_manager.set_range(analytics_manager.Range.LAST_12))
         self.day_button.setText("Today")
         self.day_button.clicked.connect(self.animations_manager.show_hourly)
+        self.week_button.clicked.connect(self.animations_manager.show_week)
         self.schedule_calendar.date_selected.connect(self.weekly_schedule_table.set_horizontal_headers_for_date)
         self.schedule_calendar.date_selected.connect(self.weekly_schedule_table.load_appointments)
+        self.schedule_calendar.date_selected.connect(self.hourly_schedule_table.load_schedule_for_day)
         self.schedule_calendar.date_selected.connect(self.animations_manager.show_week)
         self.weekly_schedule_table.add_appointment.connect(self.appointments_manager.open_new_appointment)
         self.weekly_schedule_table.appointment_options.connect(self._open_appointment_options)
+        self.weekly_schedule_table.day_selected.connect(self.hourly_schedule_table.load_schedule_for_day)
+        self.weekly_schedule_table.day_selected.connect(self.animations_manager.show_hourly)
         self.sql_monitor.customer_updates.connect(self.customer_table.update_customers)
         self.sql_monitor.ro_updates.connect(self.ro_hub_manager._on_status_changed)
         self.sql_monitor.vehicle_update.connect(self.vehicle_table.update_vehicles)
@@ -324,9 +383,15 @@ class MainWindow(QtWidgets.QMainWindow, main_form.Ui_MainWindow):
             w.setSizePolicy(pol)
 
     def switch_theme(self, theme_name: str, persist: bool = True):
-        path = THEME_FILES.get(theme_name, theme_name)
+        theme_key = theme_name or "light"
+        path = THEME_FILES.get(theme_key)
+        if path is None:
+            print(f"⚠️ Unknown theme '{theme_key}', defaulting to 'light'")
+            theme_key = "light"
+            path = THEME_FILES[theme_key]
+
         apply_stylesheet(self, path)
-        self.current_theme = theme_name
+        self.current_theme = theme_key
 
         if getattr(self, "current_user", None):
             full_name = f"{self.current_user['first_name']} {self.current_user['last_name']}"
@@ -336,14 +401,17 @@ class MainWindow(QtWidgets.QMainWindow, main_form.Ui_MainWindow):
 
         if persist and getattr(self, "current_user", None):
             from openauto.repositories.users_repository import UsersRepository
-            UsersRepository.set_theme(self.current_user["id"], self.current_theme)
+            try:
+                UsersRepository.set_theme(self.current_user["id"], self.current_theme)
+            except Exception as exc:
+                print(f"⚠️ Failed to persist theme '{self.current_theme}': {exc}")
 
         self._setup_logo()
 
     def _setup_logo(self):
         if self.current_theme == 'light':
             pixmap = QtGui.QPixmap(":/resources/OpenAuto_Icons_48x48_dark_light/mainwindow_icon/light_theme_logo.png")
-        elif self.current_theme == 'dark':
+        elif self.current_theme in ('dark', 'slate', 'system'):
             pixmap = QtGui.QPixmap(":/resources/OpenAuto_Icons_48x48_dark_light/mainwindow_icon/dark_theme_logo.png")
         else:
             return

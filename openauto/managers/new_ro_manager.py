@@ -1,18 +1,19 @@
 from pathlib import Path
 from PyQt6 import QtCore, QtWidgets
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QAbstractItemView
 from openauto.utils.validator import Validator
-from openauto.ui import new_appointment, new_customer_form, vehicle_search_form
 from openauto.managers import vehicle_manager
-from openauto.subclassed_widgets.views import small_tables
 from openauto.repositories.repair_orders_repository import RepairOrdersRepository
 from openauto.repositories.customer_repository import CustomerRepository
 from openauto.repositories.vehicle_repository import VehicleRepository
 from openauto.repositories.ro_c3_repository import ROC3Repository
-from openauto.utils.fixed_popup_combo import FixedPopupCombo
 from pyvin import VIN
 from openauto.managers.parts_tree.go_sidecar_manager import GoSidecarManager
+from openauto.managers.customer_manager import CustomerManager
+from openauto.managers.vehicle_manager import VehicleManager
+from openauto.utils.qml_utils import build_appt_qml_proxy, appt_theme_palette
+from openauto.subclassed_widgets.models.customer_list_model import CustomerListModel
+from openauto.subclassed_widgets.models.vehicle_list_model import VehicleListModel
 
 
 STATES = [
@@ -38,144 +39,211 @@ class NewROManager:
         self.vehicle_manager = vehicle_manager.VehicleManager(self)
         self.selected_customer_id = None
         self._plate_sidecar = None
+        self.customer_model = CustomerListModel(self.ui)
+        self.vehicle_model = VehicleListModel(self.ui)
+        self._filter_timer = QtCore.QTimer(self.ui)
+        self._filter_timer.setSingleShot(True)
+        self._pending_filter_text = ""
+        
 
     def add_repair_order(self):
-        # Reuse new_appointment.ui, but for RO creation
-        self.ui.new_ro_page, self.ui.new_ro_page_ui = self.ui.widget_manager.create_or_restore(
-            "new_repair_order", QtWidgets.QWidget, new_appointment.Ui_new_appointment_form
-        )
-
-        self.ui.new_ro_page.setParent(self.ui, QtCore.Qt.WindowType.Dialog)
-        self.ui.new_ro_page.setWindowFlags(
-            QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog
-        )
-        self.ui.new_ro_page.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-
-        # Retitle & tweak labels for RO context
-        self.ui.new_ro_page.setWindowTitle("Create Repair Order")
-        self.ui.new_ro_page_ui.customer_label.setText("Customer")
-        self.ui.new_ro_page_ui.vehicle_label.setText("Vehicle")
-        self.ui.new_ro_page_ui.notes_appt_label.setText("Customer Concern")
-
-        # Hide appointment-only controls
-        self.ui.new_ro_page_ui.drop_appt_button.hide()
-        self.ui.new_ro_page_ui.wait_appt_button.hide()
-        self.ui.new_ro_page_ui.new_vehicle_appt_button.hide()
-
-        # Wire buttons
-        self.ui.new_ro_page_ui.cancel_appt_button.clicked.connect(
-            lambda: self.ui.widget_manager.close_and_delete("new_repair_order")
-        )
-        self.ui.new_ro_page_ui.save_appt_button.setText("Create RO")
-        self.ui.new_ro_page_ui.save_appt_button.setEnabled(False)
-
-        # Allow adding a new customer/vehicle from here as well
-        self.ui.new_ro_page_ui.new_customer_appt_button.clicked.connect(self._open_new_customer)
-        self.ui.new_ro_page_ui.new_vehicle_appt_button.clicked.connect(
-            lambda: self.add_vehicle(self.selected_customer_id))
-
-        self._load_small_tables()
-        self._connect_signals()
-        self.ui.new_ro_page.show()
-
-    def _load_small_tables(self):
-
-        self.ui.customer_table_small = small_tables.CustomerTableSmall()
-        self.ui.new_ro_page_ui.gridLayout.addWidget(self.ui.customer_table_small, 2, 0, 1, 2)
-
-        self.ui.vehicle_table_small = small_tables.VehicleTableSmall()
-        self.ui.new_ro_page_ui.gridLayout.addWidget(self.ui.vehicle_table_small, 1, 2, 2, 2)
-        self.ui.vehicle_table_small.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-
-        self.sql_monitor.small_customers_update.connect(self.ui.customer_table_small.update_customers)
-        self.sql_monitor.small_vehicles_update.connect(self.ui.vehicle_table_small.update_vehicles)
-
-    def _connect_signals(self):
-        self.ui.new_ro_page_ui.customer_search__appt_line.textChanged.connect(self._filter_customers_and_vehicles)
-        self.ui.customer_table_small.cellClicked.connect(self._filter_vehicles_by_customer)
-        self.ui.customer_table_small.itemSelectionChanged.connect(self._validate_ro_selections)
-        self.ui.vehicle_table_small.itemSelectionChanged.connect(self._validate_ro_selections)
-        self.ui.new_ro_page_ui.save_appt_button.clicked.connect(self._save_ro)
-
-
-
-    # --- Filtering logic mirrors your existing NewROManager, but using embedded tables ---
-    def _filter_customers_and_vehicles(self, text: str):
-        visible_customer_ids = set()
-
-        # Filter customer table
-        for row in range(self.ui.customer_table_small.rowCount()):
-            match = any(
-                text.lower() in (self.ui.customer_table_small.item(row, col).text().lower()
-                                    if self.ui.customer_table_small.item(row, col) else "")
-                for col in range(self.ui.customer_table_small.columnCount())
+        base_dir = Path(__file__).resolve().parents[1]
+        qml_path = str(base_dir / "qml" / "NewAppointment.qml")
+        
+        
+        try:           
+            palette = appt_theme_palette(self.ui)
+            
+            self.ui.new_ro_window, root_obj = self.ui.widget_manager.create_or_restore_qml(
+                "new_ro",
+                qml_path,
+                parent=self.ui,
+                context_properties={
+                    "themePalette": palette,
+                    "themeName": palette.get("name", "dark"),
+                    "appointmentsManager": self,
+                    "customerListModel": self.customer_model,
+                    "vehicleListModel": self.vehicle_model,
+                }
             )
-            self.ui.customer_table_small.setRowHidden(row, not match)
-
-            if match:
-                id_item = self.ui.customer_table_small.item(row, 3)  # ID column
-                if id_item:
-                    visible_customer_ids.add(id_item.text().strip())
-
-        # Filter vehicle table by matching customer IDs
-        for row in range(self.ui.vehicle_table_small.rowCount()):
-            vehicle_owner_item = self.ui.vehicle_table_small.item(row, 3)  # Owner ID column
-            if vehicle_owner_item:
-                owner_id = vehicle_owner_item.text().strip()
-                self.ui.vehicle_table_small.setRowHidden(row, owner_id not in visible_customer_ids)
-
-    def _filter_vehicles_by_customer(self, row: int):
-        if self.ui.customer_table_small.cellClicked:
-            self.ui.vehicle_table_small.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-            self.ui.new_ro_page_ui.new_vehicle_appt_button.show()
-        else:
-            self.ui.vehicle_table_small.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-            self.ui.new_ro_page_ui.new_vehicle_appt_button.hide()
-
-        id_item = self.ui.customer_table_small.item(row, 3)
-        if not id_item:
+            
+            
+            self.ui.new_ro_ui = build_appt_qml_proxy(root_obj)
+            form = self.ui.new_ro_ui
+            form.drop_appt_button.hide()
+            form.wait_appt_button.hide()
+            form.new_cust_appt_button.hide()
+            form.new_vehc_appt_button.hide()
+            self.ui.new_ro_window.setParent(self.ui, QtCore.Qt.WindowType.Dialog)
+            self.ui.new_ro_window.setWindowFlags(
+                QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog
+            )
+            self.ui.new_ro_window.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+            
+            self.ui.new_ro_window.setWindowTitle("Create Repair Order")
+            self.ui.new_ro_window.show()
+            
+            self.selected_customer_id = None
+            self.selected_vehicle_id = None
+            try:
+                self.customer_model.apply_filter("")
+            except Exception:
+                pass
+            try:
+                self.vehicle_model.filter_by_owner_ids(None)
+            except Exception:
+                pass
+            
+            try:
+                root_obj.setProperty("selectedCustomerId", "")
+                root_obj.setProperty("selectedVehicleId", "")
+                root_obj.setProperty("searchTerm", "")
+            except Exception:
+                pass
+            
+            
+           # return self.ui.new_ro_window_ui
+            
+            self._wire_new_ro_qml_signals(root_obj)
+        
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            Validator.show_validation_error(self.ui.message, "Unable to load New Repair Order dialog.")
             return
 
-        customer_id = id_item.text().strip()
+
+    def _wire_new_ro_qml_signals(self, root_obj):
+        def _safe_connect(sig, slot):
+            try:
+                sig.connect(slot, QtCore.Qt.ConnectionType.UniqueConnection)
+            except TypeError:
+                try:
+                    sig.connect(slot)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            
+        _safe_connect(
+            getattr(root_obj, "saveRequested", None),
+            lambda *args: self._save_ro(*args)
+        )
+
+        _safe_connect(
+            getattr(root_obj, "cancelRequested", None),
+            lambda: self.ui.widget_manager.close_and_delete("new_ro")
+        )
+        
+        _safe_connect(
+            getattr(root_obj, "newCustomerRequested", None),
+            self._open_new_customer
+        )
+
+        _safe_connect(
+            getattr(root_obj, "newVehicleRequested", None),
+            lambda cid=None: self.add_vehicle(cid)
+        )
+        
+        _safe_connect(
+            getattr(root_obj, "customerHighlighted", None),
+            self._on_customer_highlighted
+        )
+        
+        _safe_connect(
+            getattr(root_obj, "vehicleHighlighted", None),
+            self._on_vehicle_highlighted
+        )
+        
+        _safe_connect(
+            getattr(root_obj, "searchChanged", None),
+            self._search_filter
+        )
+        
+        
+    def _on_customer_highlighted(self, customer_id):
         self.ui.customer_id_small = customer_id
-        self.selected_customer_id = customer_id
+        try:
+            self.selected_customer_id = int(customer_id)
+        except Exception:
+            self.selected_customer_id = customer_id
+            
+        customer_table = getattr(self.ui, "customer_table_small", None)
+        vehicle_table = getattr(self.ui, "vehicle_table_small", None)
+        
+        if customer_table is not None and vehicle_table is not None:
+            self._filter_vehicles_by_customer()
+            return
+        
+        if not customer_id:
+            self.vehicle_model.filter_by_owner_ids(None)
+            self.selected_vehicle_id = None
+            return
+        
+        self.vehicle_model.filter_by_owner_ids({str(customer_id)})
+        
+        try:
+            if self.vehicle_model.rowCount() > 0:
+                first_index = self.vehicle_model.index(0, 0)
+                first_id = self.vehicle_model.data(
+                    first_index, self.vehicle_model.ID_ROLE
+                )
+                
+                try:
+                    self.selected_vehicle_id = int(first_id)
+                except Exception:
+                    self.selected_vehicle_id = first_id
+                    
+            else:
+                self.selected_vehicle_id = None
+        except Exception:
+            self.selected_vehicle_id = None
+                
+    
+    def _on_vehicle_highlighted(self, vehicle_id):
+        try:
+            self.selected_vehicle_id = int(vehicle_id)
+        except Exception:
+            self.selected_vehicle_id = vehicle_id
+            
+    
+    def _search_filter(self, text=None):
+        self._pending_filter_text = text or ""
+        self._filter_timer.stop()
+        try:
+            self._filter_timer.timeout.disconnect()
+        except Exception:
+            pass
+        self._filter_timer.timeout.connect(lambda: self._filter_customers_and_vehicles(self._pending_filter_text))
+        self._filter_timer.start(120)
+    
+    
+    # --- Filtering logic mirrors your existing NewROManager, but using embedded tables ---
+    def _filter_customers_and_vehicles(self, text=None):
+        search = (text or "").strip()
 
-        for v_row in range(self.ui.vehicle_table_small.rowCount()):
-            vehicle_owner_item = self.ui.vehicle_table_small.item(v_row, 3)
-            if vehicle_owner_item:
-                match = vehicle_owner_item.text().strip() == customer_id
-                self.ui.vehicle_table_small.setRowHidden(v_row, not match)
+        customer_table = getattr(self.ui, "customer_table_small", None)
+        vehicle_table = getattr(self.ui, "vehicle_table_small", None)
 
-        self.ui.customer_table_small.selectRow(row)
+        # --- QML / model path ---
+        if customer_table is None and vehicle_table is None:
+            visible_customer_ids = self.customer_model.apply_filter(search)
 
-        for v_row in range(self.ui.vehicle_table_small.rowCount()):
-            if not self.ui.vehicle_table_small.isRowHidden(v_row):
-                self.ui.vehicle_table_small.selectRow(v_row)
-                break
+            if search:
+                self.vehicle_model.filter_by_owner_ids(visible_customer_ids)
+            else:
+                self.vehicle_model.filter_by_owner_ids(None)
+            return
+
+                
+                
+                
 
     # --- Actions ---
     def _open_new_customer(self):
-        self.ui.show_new_customer_page, self.ui.show_new_customer_page_ui = self.ui.widget_manager.create_or_restore(
-            "new_customer", QtWidgets.QWidget, new_customer_form.Ui_create_customer_form
-        )
-
-        self.ui.show_new_customer_page.setParent(self.ui, QtCore.Qt.WindowType.Dialog)
-
-        self.ui.show_new_customer_page.setWindowFlags(
-            QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog
-        )
-
-        self.ui.show_new_customer_page.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        self.ui.show_new_customer_page_ui.cancel_customer_button.clicked.connect(
-            lambda: self.ui.widget_manager.close_and_delete("new_customer"))
-
-        self.ui.show_new_customer_page_ui.edit_customer_button.hide()
-        self.ui.show_new_customer_page.setFocus()
-        self.ui.show_new_customer_page.setFixedSize(606, 693)
-        self.ui.show_new_customer_page.setWindowTitle("New Customer")
-        self.ui.show_new_customer_page_ui.phone_line.setInputMask('(000) 000-0000;_')
-        self.ui.show_new_customer_page.show()
-        self.ui.show_new_customer_page_ui.save_customer_button.clicked.connect(self.save_customer)
+        # Use the shared NewCustomer QML dialog via CustomerManager
+        cm = CustomerManager(self.ui)
+        cm.open_new_customer(on_saved=self.save_customer)
 
 
     def save_customer(self):
@@ -205,56 +273,79 @@ class NewROManager:
         if customer_id is not None:
             self.selected_customer_id = customer_id
 
+        # Use the shared VehicleSearch QML dialog via VehicleManager's loader + proxy,
+        # but keep this manager's search/save logic.
+        vm = VehicleManager(self.ui)
+        base_dir = Path(__file__).resolve().parents[1]
+        qml_path = str(base_dir / "qml" / "VehicleSearch.qml")
 
-        self.ui.vehicle_window, self.ui.vehicle_window_ui = self.ui.widget_manager.create_or_restore(
-            "vehicle_window", QtWidgets.QWidget, vehicle_search_form.Ui_vehicle_search_form
-        )
+        try:
+            palette = vm._theme_palette()
+            self.ui.vehicle_window, root_obj = self.ui.widget_manager.create_or_restore_qml(
+                "vehicle_window",
+                qml_path,
+                parent=self.ui,
+                context_properties={
+                    "vehicleManager": vm,
+                    "mainWindow": self.ui,
+                    "themePalette": palette,
+                    "themeName": palette.get("name", "dark"),
+                },
+            )
 
-        self.ui.vehicle_window.setParent(self.ui, QtCore.Qt.WindowType.Dialog
-                                         )
-        self.ui.vehicle_window.setWindowFlags(
-            QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog
-        )
+            # Reuse VehicleManager's proxy so form.* APIs match the old widget form.
+            self.ui.vehicle_window_ui = vm._build_qml_proxy(root_obj)
 
-        self.ui.vehicle_window.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        self.ui.vehicle_window.setFocus()
-        
-        btn = self.ui.vehicle_window_ui.vin_search_button
-        btn.setMinimumWidth(120)
-        btn.setMaximumWidth(120)
-        btn.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Fixed,
-            btn.sizePolicy().verticalPolicy(),
-        )
-        
-        self.ui.vehicle_window_ui.vehicle_cancel_button.clicked.connect(
-            lambda: self.ui.widget_manager.close_and_delete("vehicle_window"))
-        self.ui.vehicle_window_ui.vin_line.textChanged.connect(self._enforce_uppercase_vin)
-        self.ui.vehicle_window_ui.plate_line.textChanged.connect(self._enforce_uppercase_plate)
-        self.ui.vehicle_window_ui.vin_search_button.clicked.connect(self.search_vehicle)
-        self.ui.vehicle_window_ui.vehicle_save_button.clicked.connect(self.save_vehicle)
+            self.ui.vehicle_window.setParent(self.ui, QtCore.Qt.WindowType.Dialog)
+            self.ui.vehicle_window.setWindowFlags(
+                QtCore.Qt.WindowType.FramelessWindowHint | QtCore.Qt.WindowType.Dialog
+            )
 
-        if _ptcli_available():
-            old = self.ui.vehicle_window_ui.plate_state_box
-            parent = old.parent()
-            layout = old.parent().layout()
+            self.ui.vehicle_window.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+            self.ui.vehicle_window.setFocus()
 
-            combo = FixedPopupCombo(max_popup_height=200, parent=parent)
-            combo.setObjectName("plate_state_box")
-            combo.addItems(STATES)
+            form = self.ui.vehicle_window_ui
 
-            layout.replaceWidget(old, combo)
-            old.deleteLater()
-            self.ui.vehicle_window_ui.plate_state_box = combo
-            self.ui.vehicle_window_ui.plate_state_box.setMinimumWidth(80)
-            self.ui.vehicle_window_ui.plate_line.setVisible(True)
-        else:
-            self.ui.vehicle_window_ui.plate_state_box.hide()
-            try:
-                self.ui.vehicle_window_ui.plate_line.hide()
-            except Exception:
-                pass
-        self.ui.vehicle_window.show()
+            if form.vehicle_cancel_button and form.vehicle_cancel_button.clicked:
+                form.vehicle_cancel_button.clicked.connect(
+                    lambda: self.ui.widget_manager.close_and_delete("vehicle_window")
+                )
+            if form.vin_line and form.vin_line.textChanged:
+                form.vin_line.textChanged.connect(self._enforce_uppercase_vin)
+            if form.plate_line and form.plate_line.textChanged:
+                form.plate_line.textChanged.connect(self._enforce_uppercase_plate)
+            if form.vin_search_button and form.vin_search_button.clicked:
+                form.vin_search_button.clicked.connect(self.search_vehicle)
+            if form.vehicle_save_button and form.vehicle_save_button.clicked:
+                form.vehicle_save_button.clicked.connect(self.save_vehicle)
+
+            if _ptcli_available():
+                if form.plate_state_box:
+                    try:
+                        form.plate_state_box.addItems(STATES)
+                        form.plate_state_box.show()
+                    except Exception:
+                        pass
+                if form.plate_line:
+                    try:
+                        form.plate_line.show()
+                    except Exception:
+                        pass
+            else:
+                if form.plate_state_box:
+                    try:
+                        form.plate_state_box.hide()
+                    except Exception:
+                        pass
+                if form.plate_line:
+                    try:
+                        form.plate_line.hide()
+                    except Exception:
+                        pass
+
+            self.ui.vehicle_window.show()
+        except Exception:
+            Validator.show_validation_error(self.ui.message, "Unable to load vehicle search.")
 
     def search_vehicle(self):
         form = self.ui.vehicle_window_ui
@@ -463,99 +554,65 @@ class NewROManager:
                 tbl.selectRow(r)
                 break
 
-    def _validate_ro_selections(self):
-        cust_tbl = self.ui.customer_table_small
-        veh_tbl = self.ui.vehicle_table_small
-        btn = self.ui.new_ro_page_ui.save_appt_button
 
-        # must have a selected row in both tables
-        c_row = cust_tbl.currentRow()
-        v_row = veh_tbl.currentRow()
-        ok = (c_row is not None and c_row >= 0 and v_row is not None and v_row >= 0)
 
-        # and the selected vehicle must belong to the selected customer
-        if ok:
-            cust_id_item = cust_tbl.item(c_row, 3)  # hidden customer_id
-            owner_id_item = veh_tbl.item(v_row, 3)  # hidden vehicle owner customer_id
-            ok = bool(cust_id_item and owner_id_item and
-                      cust_id_item.text().strip() == owner_id_item.text().strip())
-
-        btn.setEnabled(ok)
-
-    def _save_ro(self):
-        # use the programmatic small tables
-        cust_tbl = self.ui.customer_table_small
-        veh_tbl = self.ui.vehicle_table_small
-
-        c_row = cust_tbl.currentRow()
-        v_row = veh_tbl.currentRow()
-
-        # fall back to first visible row if nothing is formally selected
-        if c_row < 0:
-            for r in range(cust_tbl.rowCount()):
-                if not cust_tbl.isRowHidden(r):
-                    c_row = r
-                    cust_tbl.selectRow(r)
-                    break
-        if v_row < 0:
-            for r in range(veh_tbl.rowCount()):
-                if not veh_tbl.isRowHidden(r):
-                    v_row = r
-                    veh_tbl.selectRow(r)
-                    break
-
-        if c_row < 0:
-            self.ui.message.setText("Select a customer.")
+    def _save_ro(self, customer_id=None, vehicle_id=None, notes=None, dropoff_type=None):
+        customer_id = customer_id or self.selected_customer_id or getattr(self.ui, "customer_id_small", None)
+        if not customer_id:
+            self.ui.message.setText("No customer selected.")
             self.ui.message.show()
             return
-        if v_row < 0:
-            self.ui.message.setText("Select a vehicle.")
-            self.ui.message.show()
-            return
-
-        customer_id = cust_tbl.item(c_row, 3).text().strip()  # owner customer_id
-        owner_id = veh_tbl.item(v_row, 3).text().strip()  # owner customer_id (hidden)
-        vin = veh_tbl.item(v_row, 4).text().strip()  # vin (hidden)
-        vehicle_id = int(veh_tbl.item(v_row, 5).text().strip())  # <-- vehicle PK (hidden)
-        print(vehicle_id)
-
-        if owner_id != customer_id:
-            self.ui.message.setText("Selected vehicle does not belong to the selected customer.")
-            self.ui.message.show()
-            return
-
-        current_user_id = getattr(self.ui, "current_user_id", None)
-        assigned_writer_id = getattr(self.ui, "assigned_writer_id", None)
-        if current_user_id is None:
-            cu = getattr(self.ui, "current_user", None)
-            if isinstance(cu, dict):
-                current_user_id = cu.get("id")
-            else:
-                current_user_id = getattr(cu, "id", None)
-
-        if assigned_writer_id is None:
-            aw = getattr(self.ui, "current_user", None)
-            if isinstance(aw, dict ):
-                assigned_writer_id = aw.get("id")
-            else:
-                assigned_writer_id = getattr(aw, "id", None)
-
-
-
-        ro_id = RepairOrdersRepository.create_repair_order(
-            customer_id=customer_id,
-            vehicle_id=vehicle_id,
-            appointment_id=None,
-            ro_number=None,
-            created_by=current_user_id,
-            assigned_writer_id=assigned_writer_id,
-        )
-
+        
         try:
-            concern = self.ui.new_ro_page_ui.notes_appt_edit.toPlainText().strip()
-            if concern:
-                ROC3Repository.set_or_create_concern(ro_id, concern, created_by=current_user_id)
+            customer_id_int = int(customer_id)
         except Exception:
-            pass
+            customer_id_int = customer_id
+        
+        vehicle_id = vehicle_id or self.selected_vehicle_id
+        if vehicle_id in ("", None):
+            vehicle_id_int = None
+        else:
+            try:
+                vehicle_id_int = int(vehicle_id)
+            except Exception:
+                vehicle_id_int = vehicle_id
+        
+        
+        notes_text = (notes or "").strip()
+        
+        try:
+            current_user_id = getattr(self.ui, "current_user_id", None)
+            if current_user_id is None:
+                cu = getattr(self.ui, "current_user", None)
+                current_user_id = cu.get("id") if isinstance(cu, dict) else getattr(cu, "id", None)
+                
+            assigned_writer_id = getattr(self.ui, "assigned_writer_id", None)
+            if assigned_writer_id is None:
+                aw = getattr(self.ui, "assigned_writer", None)
+                assigned_writer_id = aw.get("id") if isinstance(aw, dict) else getattr(aw, "id", None)
+            
+            ro_id = None
+            if vehicle_id_int:
+                ro_id = RepairOrdersRepository.create_repair_order(
+                    customer_id=customer_id_int,
+                    vehicle_id=vehicle_id_int,
+                    appointment_id=None,
+                    ro_number=None,
+                    created_by=current_user_id,
+                    assigned_writer_id=assigned_writer_id,
+                )
 
-        self.ui.widget_manager.close_and_delete("new_repair_order")
+                if notes_text:
+                    ROC3Repository.set_or_create_concern(
+                        ro_id,
+                        notes_text,
+                        created_by=current_user_id
+                    )
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.ui.message.setText("Failed to create Repair Order.")
+            self.ui.message.show()
+            return
+
+        self.ui.widget_manager.close_and_delete("new_ro")
