@@ -11,7 +11,8 @@ This branch contains an early central API foundation for the multi-workshop demo
   and revocation.
 - Opt-in `/auth/login`, `/auth/me`, and `/auth/logout` routes. These routes
   are not mounted unless `OAC_ENABLE_TENANT_AUTH=true`.
-- Unit tests for authentication contracts and API route gating.
+- A Windows-side HTTP transport foundation with HTTPS enforcement for non-loopback hosts and in-memory bearer-token handling. It is not yet wired into legacy login/repositories.
+- Unit tests for authentication contracts, client transport behavior, and API route gating.
 - Migration design and preflight requirements in
   `docs/tenant-authentication-migration.md`.
 
@@ -35,7 +36,7 @@ From a clean Python environment:
 
 ```bash
 python -m pip install -r requirements-dev.txt
-python -m pytest -q tests/test_api_foundation.py tests/test_tenant_auth_contract.py tests/test_api_auth_routes.py
+python -m pytest -q tests/test_api_foundation.py tests/test_tenant_auth_contract.py tests/test_api_auth_routes.py tests/test_central_api_client.py
 ```
 
 The tests use fakes and do not connect to a real database. Passing unit tests
