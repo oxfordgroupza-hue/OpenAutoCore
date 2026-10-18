@@ -41,7 +41,7 @@ class TenantAuthService:
         except (ValueError, TypeError, UnicodeError):
             return False
 
-    def login(self, username_or_email: str, plain_password: str) -> dict[str, Any]:
+    def login(self, username_or_email: str, plain_password: str, shop_id: int | None = None) -> dict[str, Any]:
         """Create a short-lived random session only for an active membership.
 
         A user with multiple workshop memberships must select a workshop through
@@ -76,15 +76,26 @@ class TenantAuthService:
             if not self._verify_password(plain_password, password_hash):
                 raise AuthenticationError("Invalid credentials")
 
-            # Multiple active memberships require a deliberate workshop chooser.
-            memberships = {
-                (int(row["shop_id"]), str(row["workshop_role"]))
+            # The workshop list is disclosed only after the password is verified.
+            unique_memberships = {
+                int(row["shop_id"]): str(row["workshop_role"])
                 for row in rows
             }
-            if len(memberships) != 1:
-                raise AuthenticationError("Workshop selection is required")
-
-            row = rows[0]
+            if shop_id is None and len(unique_memberships) > 1:
+                return {
+                    "selection_required": True,
+                    "workshops": [
+                        {"id": member_shop_id, "role": role}
+                        for member_shop_id, role in sorted(unique_memberships.items())
+                    ],
+                }
+            if shop_id is not None:
+                selected = [row for row in rows if int(row["shop_id"]) == int(shop_id)]
+                if not selected:
+                    raise AuthenticationError("Invalid credentials")
+                row = selected[0]
+            else:
+                row = rows[0]
             token = secrets.token_urlsafe(32)
             token_digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
             with conn.cursor() as cur:
