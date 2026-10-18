@@ -1,42 +1,57 @@
 # Central API foundation status
 
-## Implemented on `multi-shop-foundation`
+This branch contains an early central API foundation for the multi-workshop demo.
 
-- `api/main.py` defines a separate FastAPI application with a single `GET /health` endpoint.
-- `tests/test_api_foundation.py` checks the health response and verifies that common business-data routes are not exposed accidentally.
-- The API does not connect to MySQL and does not read or mutate application data.
-- The original Windows desktop client and database repositories remain unchanged.
-- Interactive API documentation and the OpenAPI schema are disabled by default.
+## Implemented
 
-## Local checks
+- Health-only FastAPI endpoint at `GET /health`.
+- Interactive API docs and OpenAPI schema disabled by default.
+- Tenant-aware authentication service primitives with random bearer tokens,
+  SHA-256 token digests in storage, short session lifetime, membership checks,
+  and revocation.
+- Opt-in `/auth/login`, `/auth/me`, and `/auth/logout` routes. These routes
+  are not mounted unless `OAC_ENABLE_TENANT_AUTH=true`.
+- Unit tests for authentication contracts and API route gating.
+- Migration design and preflight requirements in
+  `docs/tenant-authentication-migration.md`.
 
-In a disposable virtual environment, install only the API test dependencies (the full desktop application's PyQt and integration dependencies are not needed for these isolated tests):
+## Not production-ready
 
-```powershell
+- The authentication migration is a design draft and has **not** been applied
+  to any database.
+- The API does not yet expose business data routes.
+- The legacy desktop repositories still connect directly to MySQL. They have
+  not been converted to use the central API.
+- Business tables are not yet fully workshop-scoped; existing data must not be
+  exposed through a multi-workshop service.
+- Login throttling, operational monitoring, secret management, backups, TLS
+  deployment, and full integration tests remain release requirements.
+- GitHub Actions currently reports a failed job before any steps are visible;
+  the test suite has not been confirmed passing in CI.
+
+## Local contract tests
+
+From a clean Python environment:
+
+```bash
 python -m pip install -r requirements-dev.txt
-python -m pytest -q tests/test_api_foundation.py
+python -m pytest -q tests/test_api_foundation.py tests/test_tenant_auth_contract.py tests/test_api_auth_routes.py
 ```
 
-Run a local server with the repository's normal requirements installed:
+The tests use fakes and do not connect to a real database. Passing unit tests
+would not prove that the migration works against the target MySQL version.
 
-```powershell
-python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
-```
+## Required release gates
 
-Then request `http://127.0.0.1:8000/health`. Stop the server with Ctrl+C. This is a local process check, not a production deployment or a multi-workshop readiness test.
-
-## Why authentication and business routes are not enabled yet
-
-The existing schema has a `users` table and persistent sessions, but no authoritative user-to-workshop membership model. Most core records also lack a workshop ownership column. Adding login alone would not protect customer data: every business-data route must resolve workshop membership server-side and validate ownership of linked records.
-
-Before adding authenticated business endpoints:
-
-1. Design a reviewed, reversible migration for workshop membership and ownership across customers, vehicles, appointments, estimates, estimate jobs/items, repair orders, invoices, payments, inspections/findings, parts orders/sessions, integrations, and settings.
-2. Decide how existing rows are assigned to a named legacy/demo workshop; never silently map live records.
-3. Implement server-side sessions, logout/revocation, expiry, login throttling, and secret handling.
-4. Enforce workshop membership and role checks in every query and mutation. Verify linked IDs belong to the same workshop.
-5. Replace global and destructive settings save operations (including table-wide truncate/rewrite patterns) before multi-shop use.
-6. Add cross-workshop denial tests, migration rollback tests, backup/restore checks, and concurrency tests.
-7. Migrate the Windows client away from direct MySQL access only after the central API supports the specific workflows enabled in the client.
-
-No schema migration, database connection, cloud deployment, or production data change has been performed.
+1. Restore a backup into a disposable MySQL test database.
+2. Apply and verify the reviewed migration there.
+3. Test account creation, membership changes, login, expiry, revocation, and
+   multi-workshop selection.
+4. Convert all business-data repository access to authenticated central API
+   requests and remove database credentials from Windows clients.
+5. Add tenant ownership to all business records and child relationships.
+6. Test every read/write/list/export/integration path against two isolated
+   workshops, including attempts to substitute foreign record IDs.
+7. Build and test a Windows installer against a test API.
+8. Deploy only after all release gates pass. No paid cloud resources or
+   production database changes are authorized by this branch work.
