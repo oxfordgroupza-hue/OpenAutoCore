@@ -44,8 +44,8 @@ class TenantAuthService:
     def login(self, username_or_email: str, plain_password: str, shop_id: int | None = None) -> dict[str, Any]:
         """Create a short-lived random session only for an active membership.
 
-        A user with multiple workshop memberships must select a workshop through
-        a separate explicit flow; this method intentionally refuses ambiguity.
+        A user with multiple workshop memberships receives a list of memberships after
+        password verification and must select one explicitly before a session is created.
         """
         identity = (username_or_email or "").strip()
         if not identity or not plain_password:
