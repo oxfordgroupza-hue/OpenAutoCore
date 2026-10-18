@@ -38,7 +38,7 @@ ownership work and cross-tenant tests are complete.
 
 ## Proposed additive DDL
 
-Review and adapt this DDL only after preflight. It is not an automatic migration.
+The reviewed draft is also stored at `migrations/001_tenant_auth.sql`. Review and adapt it only after preflight. It is not an automatic migration and has not been executed.
 
 ```sql
 CREATE TABLE workshop_memberships (
