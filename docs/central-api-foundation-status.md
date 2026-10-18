@@ -3,21 +3,21 @@
 ## Implemented on `multi-shop-foundation`
 
 - `api/main.py` defines a separate FastAPI application with a single `GET /health` endpoint.
-- `tests/test_api_auth.py` checks the health response and verifies that common business-data routes are not exposed accidentally.
+- `tests/test_api_foundation.py` checks the health response and verifies that common business-data routes are not exposed accidentally.
 - The API does not connect to MySQL and does not read or mutate application data.
 - The original Windows desktop client and database repositories remain unchanged.
 - API docs are currently enabled by FastAPI defaults for development. Do not expose this service publicly until production configuration is reviewed.
 
 ## Local checks
 
-Install the repository requirements and test dependency in a disposable virtual environment, then run:
+In a disposable virtual environment, install only the API test dependencies (the full desktop application's PyQt and integration dependencies are not needed for these isolated tests):
 
 ```powershell
-python -m pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest -q tests/test_api_auth.py
+python -m pip install -r requirements-dev.txt
+python -m pytest -q tests/test_api_foundation.py
 ```
 
-Run a local server with:
+Run a local server with the repository's normal requirements installed:
 
 ```powershell
 python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
