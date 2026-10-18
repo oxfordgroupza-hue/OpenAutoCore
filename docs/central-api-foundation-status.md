@@ -6,7 +6,7 @@
 - `tests/test_api_foundation.py` checks the health response and verifies that common business-data routes are not exposed accidentally.
 - The API does not connect to MySQL and does not read or mutate application data.
 - The original Windows desktop client and database repositories remain unchanged.
-- API docs are currently enabled by FastAPI defaults for development. Do not expose this service publicly until production configuration is reviewed.
+- Interactive API documentation and the OpenAPI schema are disabled by default.
 
 ## Local checks
 
