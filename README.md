@@ -109,3 +109,13 @@ If you're an automotive shop interested in trying OpenAuto, or a developer looki
 ![Screenshot from 2025-09-13 21-10-27.png](assets/images/Screenshot%20from%202025-09-13%2021-10-27.png)
 ![Screenshot from 2025-09-13 21-10-48.png](assets/images/Screenshot%20from%202025-09-13%2021-10-48.png)
 
+
+
+## Multi-workshop demo work (experimental branch)
+
+The `multi-shop-foundation` branch is developing a central API and tenant
+isolation model. It is **not yet safe for multi-workshop deployment**: the
+legacy Windows client still connects directly to MySQL, and business tables
+have not yet been fully scoped by workshop. See
+[`docs/central-api-foundation-status.md`](docs/central-api-foundation-status.md)
+and [`docs/database-tenant-inventory.md`](docs/database-tenant-inventory.md).
