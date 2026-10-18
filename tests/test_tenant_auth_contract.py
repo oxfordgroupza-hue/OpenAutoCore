@@ -99,13 +99,26 @@ def test_unknown_user_is_rejected():
         TenantAuthService(lambda: conn).login("unknown", "password")
 
 
-def test_multiple_active_memberships_are_not_guessed():
+def test_multiple_active_memberships_require_explicit_selection():
     row = _row("password")
-    second = dict(row, shop_id=11)
+    second = dict(row, shop_id=11, workshop_role="technician")
     conn = FakeConnection(login_rows=[row, second])
-    with pytest.raises(AuthenticationError, match="Workshop selection"):
-        TenantAuthService(lambda: conn).login("shopowner", "password")
-    assert conn.rolled_back
+    result = TenantAuthService(lambda: conn).login("shopowner", "password")
+    assert result["selection_required"] is True
+    assert result["workshops"] == [
+        {"id": 10, "role": "owner"},
+        {"id": 11, "role": "technician"},
+    ]
+    assert not conn.queries or all("INSERT INTO user_sessions" not in q for q, _ in conn.queries)
+
+
+def test_login_can_select_one_of_multiple_workshops():
+    row = _row("password")
+    second = dict(row, shop_id=11, workshop_role="technician")
+    conn = FakeConnection(login_rows=[row, second])
+    result = TenantAuthService(lambda: conn).login("shopowner", "password", shop_id=11)
+    assert result["workshop"]["id"] == 11
+    assert result["user"]["role"] == "technician"
 
 
 def test_session_resolution_hashes_bearer_and_rechecks_membership():
