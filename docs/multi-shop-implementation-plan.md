@@ -102,4 +102,10 @@ The upstream project is GPL-3.0. Preserve required notices and review GPL obliga
 
 ## Current status
 
-This document records the initial audit and implementation sequence. It does not claim that the application has already been modified, migrated, deployed, or tested. No cloud resources are created by this plan.
+- The `multi-shop-foundation` branch contains a separate FastAPI health-only entry point, isolated test dependencies, and tests asserting that common business routes are absent.
+- The current API does not connect to MySQL, expose business data, or implement login/workshop authorization.
+- A static inventory of all 29 tables in the checked-in schema dump and a tenant-schema review have been added. They identify missing workshop ownership, global settings, linked-record risks, and schema/code drift that must be resolved before migration.
+- The two API foundation tests were run successfully against a local copy of the checked-in API and test source. A full checkout and GitHub Actions run were not possible in this environment; treat CI as not yet verified.
+- No database migration, live database connection, desktop-client refactor, cloud resource, or deployment has been performed.
+
+This is an engineering foundation, not a multi-workshop-ready product. Continue through identity, schema migration, tenant-scoped API, desktop client migration, security tests, and deployment gates in order.
