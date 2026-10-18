@@ -4,7 +4,15 @@ Only a health endpoint is exposed until authentication and workshop isolation ar
 """
 from fastapi import FastAPI
 
-app = FastAPI(title="OpenAutoCore API", version="0.1.0", redoc_url=None)
+# Keep interactive API documentation and the OpenAPI schema disabled by default.
+# Enable them deliberately in a local development-only configuration if needed.
+app = FastAPI(
+    title="OpenAutoCore API",
+    version="0.1.1",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 
 @app.get("/health", tags=["operations"])
