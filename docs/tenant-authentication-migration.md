@@ -17,8 +17,8 @@ ownership work and cross-tenant tests are complete.
   Raw tokens are returned once at login and are never stored in the database.
 - Session resolution re-checks membership status on every request, allowing
   immediate revocation.
-- A user with more than one active workshop membership must select a workshop
-  explicitly; the authentication service does not silently choose one.
+- A user with more than one active workshop membership receives the available
+  memberships only after password verification, then must explicitly select one.
 - Keep the API health-only until the migration and its integration tests are
   validated against an isolated disposable MySQL instance.
 
