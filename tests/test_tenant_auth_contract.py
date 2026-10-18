@@ -149,3 +149,11 @@ def test_logout_revokes_only_digest():
 def test_session_lifetime_is_bounded():
     with pytest.raises(ValueError):
         TenantAuthService(lambda: FakeConnection(), session_days=30)
+
+
+def test_invalid_selected_workshop_does_not_create_session():
+    conn = FakeConnection(login_rows=[_row("password")])
+    with pytest.raises(AuthenticationError, match="Invalid credentials"):
+        TenantAuthService(lambda: conn).login("shopowner", "password", shop_id=999)
+    assert conn.rolled_back
+    assert all("INSERT INTO user_sessions" not in q for q, _ in conn.queries)
