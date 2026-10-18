@@ -1,43 +1,42 @@
-# Central API authentication foundation status
+# Central API foundation status
 
-## Included on `multi-shop-foundation`
+## Implemented on `multi-shop-foundation`
 
-- `GET /health`: process health response; does not depend on MySQL.
-- `POST /auth/login`: verifies the existing `users` bcrypt password hash and creates an eight-hour bearer session in the existing `user_sessions` table.
-- `GET /auth/me`: returns the authenticated user's public profile.
-- `POST /auth/logout`: revokes the current session.
-- Database configuration is server-side only, loaded from repository-root `.env` or process environment. The Windows client must never receive MySQL credentials.
-- API documentation and OpenAPI are disabled by default. Set `APP_ENV=development` only for local development to enable `/docs` and `/openapi.json`.
-- Unit/API tests use mocked database functions and do not connect to, read, or change a real database.
+- `api/main.py` defines a separate FastAPI application with a single `GET /health` endpoint.
+- `tests/test_api_auth.py` checks the health response and verifies that common business-data routes are not exposed accidentally.
+- The API does not connect to MySQL and does not read or mutate application data.
+- The original Windows desktop client and database repositories remain unchanged.
+- API docs are currently enabled by FastAPI defaults for development. Do not expose this service publicly until production configuration is reviewed.
 
 ## Local checks
 
-Install the repository requirements and test dependencies in a disposable virtual environment, then run:
+Install the repository requirements and test dependency in a disposable virtual environment, then run:
 
 ```powershell
 python -m pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest -q tests/test_api_auth.py
 ```
 
-For a local health check:
+Run a local server with:
 
 ```powershell
 python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Then request `http://127.0.0.1:8000/health`. Do not bind to a public interface until deployment has HTTPS, rate limiting, monitoring, and reviewed secrets handling.
+Then request `http://127.0.0.1:8000/health`. Stop the server with Ctrl+C. This is a local process check, not a production deployment or a multi-workshop readiness test.
 
-## Explicitly not production-ready
+## Why authentication and business routes are not enabled yet
 
-This API is **not yet safe for a multi-workshop pilot**. The legacy schema has users but no authoritative user-to-workshop membership table, and most business tables do not have a workshop key. The current API deliberately exposes no customer, vehicle, appointment, estimate, repair-order, invoice, payment, inspection, parts, or settings routes.
+The existing schema has a `users` table and persistent sessions, but no authoritative user-to-workshop membership model. Most core records also lack a workshop ownership column. Adding login alone would not protect customer data: every business-data route must resolve workshop membership server-side and validate ownership of linked records.
 
-Before any business-data endpoint is added:
+Before adding authenticated business endpoints:
 
-1. Design a reviewed and reversible migration for workshop memberships and tenant ownership of every business record and child table.
-2. Decide how legacy/demo rows are mapped to a specific workshop; do not silently assign live data.
-3. Enforce membership and role authorization server-side, and validate ownership of linked IDs in every read and write.
-4. Store bearer-token digests rather than raw tokens in a new session schema before production.
-5. Add login throttling, audit logging, HTTPS/TLS deployment, security headers, secret rotation, backups, and cross-workshop isolation tests.
-6. Migrate the Windows client away from direct MySQL access only after the API covers the workflows being enabled.
+1. Design a reviewed, reversible migration for workshop membership and ownership across customers, vehicles, appointments, estimates, estimate jobs/items, repair orders, invoices, payments, inspections/findings, parts orders/sessions, integrations, and settings.
+2. Decide how existing rows are assigned to a named legacy/demo workshop; never silently map live records.
+3. Implement server-side sessions, logout/revocation, expiry, login throttling, and secret handling.
+4. Enforce workshop membership and role checks in every query and mutation. Verify linked IDs belong to the same workshop.
+5. Replace global and destructive settings save operations (including table-wide truncate/rewrite patterns) before multi-shop use.
+6. Add cross-workshop denial tests, migration rollback tests, backup/restore checks, and concurrency tests.
+7. Migrate the Windows client away from direct MySQL access only after the central API supports the specific workflows enabled in the client.
 
-No schema migration, database connection, cloud deployment, or production data change is performed by these files.
+No schema migration, database connection, cloud deployment, or production data change has been performed.
