@@ -28,3 +28,33 @@ def test_auth_routes_require_explicit_opt_in(monkeypatch):
     )
     monkeypatch.delenv("OAC_ENABLE_TENANT_AUTH", raising=False)
     importlib.reload(api_main)
+
+
+def test_login_route_supports_explicit_workshop_selection(monkeypatch):
+    monkeypatch.setenv("OAC_ENABLE_TENANT_AUTH", "true")
+    import api.main as api_main
+    import api.auth_routes as auth_routes
+    importlib.reload(api_main)
+
+    class FakeService:
+        def login(self, identity, password, workshop_id=None):
+            assert identity == "owner"
+            assert password == "password"
+            if workshop_id is None:
+                return {"selection_required": True, "workshops": [{"id": 7, "role": "owner"}]}
+            return {"access_token": "opaque-token", "workshop": {"id": workshop_id}}
+
+    monkeypatch.setattr(auth_routes, "service", FakeService())
+    client = TestClient(api_main.app)
+    selection = client.post("/auth/login", json={"username_or_email": "owner", "password": "password"})
+    assert selection.status_code == 200
+    assert selection.json()["selection_required"] is True
+
+    chosen = client.post("/auth/login", json={
+        "username_or_email": "owner", "password": "password", "workshop_id": 7
+    })
+    assert chosen.status_code == 200
+    assert chosen.json()["workshop"]["id"] == 7
+
+    monkeypatch.delenv("OAC_ENABLE_TENANT_AUTH", raising=False)
+    importlib.reload(api_main)
