@@ -13,7 +13,7 @@ This is a planning document only. It does not modify or migrate a database.
 - Inspection records, parts/integration session data, and callback payloads must be traced through their parent records and external identifiers before they are exposed through an API.
 - `shop_info` exists, and some integration tables already carry a `shop_id`, but this partial support does not prove end-to-end tenant isolation.
 - `pricing_matrix`, `labor_rates`, `tax_rates`, and `app_settings` are currently read as global settings in the legacy repositories.
-- Existing settings repository operations include table-wide destructive rewrite patterns. Those operations cannot be reused unchanged in a multi-workshop environment.
+- `openauto/managers/settings_manager.py` contains table-wide `TRUNCATE` then rewrite flows for `shop_info`, `pricing_matrix`, `labor_rates`, and `tax_rates`. Those operations would erase other workshops' settings and must be replaced before multi-shop use.
 - The legacy database schema includes existing rows. A migration must explicitly map those rows to an approved legacy/demo workshop and must not assume that numeric ID 1 is always the correct tenant.
 
 ## Required migration design before implementation
