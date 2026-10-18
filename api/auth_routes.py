@@ -19,6 +19,7 @@ service = TenantAuthService(connect_db, session_days=1)
 class LoginRequest(BaseModel):
     username_or_email: str = Field(min_length=1, max_length=254)
     password: str = Field(min_length=1, max_length=1024)
+    workshop_id: int | None = Field(default=None, ge=1)
 
 
 def _current_session(
@@ -38,7 +39,7 @@ def _current_session(
 @router.post("/login")
 def login(payload: LoginRequest) -> dict:
     try:
-        return service.login(payload.username_or_email, payload.password)
+        return service.login(payload.username_or_email, payload.password, payload.workshop_id)
     except AuthenticationError as exc:
         raise HTTPException(status_code=401, detail=str(exc))
     except Exception:
