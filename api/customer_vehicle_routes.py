@@ -49,7 +49,7 @@ class VehicleCreate(BaseModel):
     vin: str | None = Field(default=None, max_length=17)
     plate: str | None = Field(default=None, max_length=20)
     plate_state: str | None = Field(default=None, max_length=20)
-    year: int | None = Field(default=None, ge=1886, le=2200)
+    year: str | None = Field(default=None, max_length=30)
     make: str = Field(min_length=1, max_length=100)
     model: str = Field(min_length=1, max_length=100)
     engine_size: str | None = Field(default=None, max_length=100)
