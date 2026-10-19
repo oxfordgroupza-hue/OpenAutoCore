@@ -26,3 +26,10 @@ from api.auth_routes import enabled_by_environment
 if enabled_by_environment():
     from api.auth_routes import router as auth_router
     app.include_router(auth_router)
+
+# Business data remains separately gated until migration 002 is applied and
+# ownership mappings are explicitly provisioned and reviewed.
+import os
+if enabled_by_environment() and os.getenv("OAC_ENABLE_TENANT_DATA", "").strip().lower() in {"1", "true", "yes"}:
+    from api.customer_vehicle_routes import router as customer_vehicle_router
+    app.include_router(customer_vehicle_router)
