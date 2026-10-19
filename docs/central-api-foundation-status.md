@@ -27,8 +27,7 @@ This branch contains an early central API foundation for the multi-workshop demo
   exposed through a multi-workshop service.
 - Login throttling, operational monitoring, secret management, backups, TLS
   deployment, and full integration tests remain release requirements.
-- GitHub Actions currently reports a failed job before any steps are visible;
-  the test suite has not been confirmed passing in CI.
+- GitHub Actions is blocked before job startup because GitHub reports: `The job was not started because your account is locked due to a billing issue.` This is an account-level runner/billing blocker, not a test assertion failure. The test suite has not been confirmed passing in CI. Re-enable Actions by resolving the repository owner's GitHub billing/account lock, then rerun the workflow.
 
 ## Local contract tests
 
